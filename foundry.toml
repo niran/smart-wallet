@@ -7,6 +7,10 @@ fs_permissions = [
     { access = "read-write", path = "/tmp/ERC712-test.json" },
 ]
 
+remappings = [
+    "keyspace-v2/=lib/keyspace-v2/contracts/src/",
+]
+
 [profile.deploy]
 optimizer = true
 optimizer_runs = 999999

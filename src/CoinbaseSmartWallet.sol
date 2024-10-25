@@ -9,8 +9,8 @@ import {SignatureCheckerLib} from "solady/utils/SignatureCheckerLib.sol";
 import {UUPSUpgradeable} from "solady/utils/UUPSUpgradeable.sol";
 import {WebAuthn} from "webauthn-sol/WebAuthn.sol";
 
-import {IKeyStore} from "./ext/IKeyStore.sol";
-import {IVerifier} from "./ext/IVerifier.sol";
+import {BridgedKeystore} from "keyspace-v2/BridgedKeystore.sol";
+import {CoinbaseSmartWalletRecordController} from "./CoinbaseSmartWalletRecordController.sol";
 
 import {ERC1271} from "./ERC1271.sol";
 
@@ -18,8 +18,7 @@ import {ERC1271} from "./ERC1271.sol";
 ///
 /// @custom:storage-location erc7201:coinbase.storage.CoinbaseSmartWalletStorage
 struct CoinbaseSmartWalletStorage {
-    uint256 ksKey;
-    CoinbaseSmartWallet.KeyspaceKeyType ksKeyType;
+    uint256 ksID;
 }
 
 /// @title Coinbase Smart Wallet
@@ -71,11 +70,11 @@ contract CoinbaseSmartWallet is ERC1271, IAccount, UUPSUpgradeable, Receiver {
     /// @dev Helps enforce sequential sequencing of replayable transactions.
     uint256 public constant REPLAYABLE_NONCE_KEY = 8453;
 
-    /// @notice The KeyStore contract from which the L1 roots are fetched.
-    IKeyStore public immutable keyStore;
-
-    /// @notice The StateVerifier contract used to verify state proofs.
-    IVerifier public immutable stateVerifier;
+    /// @notice The BridgedKeystore used to prove the current configuration of the wallet.
+    BridgedKeystore public immutable keystore;
+    
+    /// @notice The Keyspace record controller used to authorize signatures.
+    CoinbaseSmartWalletRecordController public immutable controller;
 
     /// @notice Thrown when `initialize` is called but the account has already been initialized.
     error Initialized();
@@ -144,33 +143,24 @@ contract CoinbaseSmartWallet is ERC1271, IAccount, UUPSUpgradeable, Receiver {
         }
     }
 
-    constructor(address keyStore_, address stateVerifier_) {
+    constructor(address keystore_, address controller_) {
         // Set the immutable variables that will be used by all proxies pointing to this implementation.
-        keyStore = IKeyStore(keyStore_);
-        stateVerifier = IVerifier(stateVerifier_);
-
-        // Implementation should not be initializable (does not affect proxies which use their own storage).
-        _getCoinbaseSmartWalletStorage().ksKey = 1;
-        _getCoinbaseSmartWalletStorage().ksKeyType = KeyspaceKeyType.Secp256k1;
+        keystore = BridgedKeystore(keystore_);
+        controller = CoinbaseSmartWalletRecordController(controller_);
     }
 
     /// @notice Initializes the account.
     ///
     /// @dev Reverts if the account has already been initialized.
     ///
-    /// @param ksKey     The Keyspace key.
+    /// @param ksID     The Keyspace ID.
     /// @param ksKeyType The Keyspace key type.
-    function initialize(uint256 ksKey, KeyspaceKeyType ksKeyType) external payable virtual {
-        if (_getCoinbaseSmartWalletStorage().ksKey != 0) {
+    function initialize(uint256 ksID) external payable virtual {
+        if (_getCoinbaseSmartWalletStorage().ksID != 0) {
             revert Initialized();
         }
 
-        if (ksKeyType == KeyspaceKeyType.None) {
-            revert KeyspaceKeyTypeCantBeNone();
-        }
-
-        _getCoinbaseSmartWalletStorage().ksKey = ksKey;
-        _getCoinbaseSmartWalletStorage().ksKeyType = ksKeyType;
+        _getCoinbaseSmartWalletStorage().ksID = ksID;
     }
 
     /// @inheritdoc IAccount
@@ -338,46 +328,18 @@ contract CoinbaseSmartWallet is ERC1271, IAccount, UUPSUpgradeable, Receiver {
     /// @param signature ABI encoded `SignatureWrapper`.
     function _isValidSignature(bytes32 h, bytes calldata signature) internal view virtual override returns (bool) {
         // Decode the raw `signature`.
-        (bytes memory sig, uint256 publicKeyX, uint256 publicKeyY, bytes memory stateProof) =
-            abi.decode(signature, (bytes, uint256, uint256, bytes));
+        (bytes memory sig, bytes memory recordValue, bytes memory keystoreStorageRootProof, bytes[] memory confirmedValueHashStorageProof) =
+            abi.decode(signature, (bytes, bytes, bytes, bytes[]));
 
-        // Verify the state proof.
-        uint256[] memory data = new uint256[](8);
-        data[0] = publicKeyX;
-        data[1] = publicKeyY;
-
-        uint256[] memory publicInputs = new uint256[](3);
-        publicInputs[0] = _getCoinbaseSmartWalletStorage().ksKey;
-        publicInputs[1] = keyStore.root();
-        publicInputs[2] = uint256(keccak256(abi.encodePacked(data)) >> 8);
-
-        bool isValidProof;
-        try stateVerifier.Verify(stateProof, publicInputs) returns (bool isValid) {
-            isValidProof = isValid;
-        } catch {}
-
-        // Handle the Secp256k1 signature type.
-        bool isValidSig;
-        if (_getCoinbaseSmartWalletStorage().ksKeyType == KeyspaceKeyType.Secp256k1) {
-            bytes memory publicKeyBytes = abi.encode(publicKeyX, publicKeyY);
-            address signer = address(bytes20(keccak256(publicKeyBytes) << 96));
-
-            isValidSig = SignatureCheckerLib.isValidSignatureNow(signer, h, sig);
-        }
-        // Handle the WebAuthn signature type.
-        else {
-            WebAuthn.WebAuthnAuth memory auth = abi.decode(sig, (WebAuthn.WebAuthnAuth));
-
-            isValidSig = WebAuthn.verify({
-                challenge: abi.encode(h),
-                requireUV: false,
-                webAuthnAuth: auth,
-                x: publicKeyX,
-                y: publicKeyY
-            });
+        if (!keystore.isValueHashCurrent(
+                _getCoinbaseSmartWalletStorage().ksID,
+                keccak256(recordValue),
+                keystoreStorageRootProof,
+                confirmedValueHashStorageProof)) {
+            return false;
         }
 
-        return isValidProof && isValidSig;
+        return controller.isValidSignature(h, sig, recordValue);
     }
 
     /// @inheritdoc UUPSUpgradeable
