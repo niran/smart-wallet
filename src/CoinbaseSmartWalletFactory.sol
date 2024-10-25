@@ -31,42 +31,40 @@ contract CoinbaseSmartWalletFactory {
     ///
     /// @dev Deployed as a ERC-1967 proxy that's implementation is `this.implementation`.
     ///
-    /// @param ksKey     The The Keyspace key.
-    /// @param ksKeyType The Keyspace key type.
+    /// @param ksID      The The Keyspace ID.
     /// @param nonce     The nonce of the account, a caller defined value which allows multiple accounts
-    ///                  with the same `ksKeyAndType` to exist at different addresses.
+    ///                  with the same `ksID` to exist at different addresses.
     ///
-    /// @return account The address of the ERC-1967 proxy created with inputs `ksKeyAndType`, `nonce`, and
+    /// @return account The address of the ERC-1967 proxy created with inputs `ksID`, `nonce`, and
     ///                 `this.implementation`.
-    function createAccount(uint256 ksKey, CoinbaseSmartWallet.KeyspaceKeyType ksKeyType, uint256 nonce)
+    function createAccount(uint256 ksID, uint256 nonce)
         external
         payable
         virtual
         returns (CoinbaseSmartWallet account)
     {
         (bool alreadyDeployed, address accountAddress) =
-            LibClone.createDeterministicERC1967(msg.value, implementation, _getSalt(ksKey, ksKeyType, nonce));
+            LibClone.createDeterministicERC1967(msg.value, implementation, _getSalt(ksKey, nonce));
 
         account = CoinbaseSmartWallet(payable(accountAddress));
 
         if (!alreadyDeployed) {
-            account.initialize(ksKey, ksKeyType);
+            account.initialize(ksID);
         }
     }
 
     /// @notice Returns the deterministic address of the account that would be created by `createAccount`.
     ///
-    /// @param ksKey     The The Keyspace key.
-    /// @param ksKeyType The Keyspace key type.
+    /// @param ksID     The The Keyspace ID.
     /// @param nonce     The nonce provided to `createAccount()`.
     ///
     /// @return The predicted account deployment address.
-    function getAddress(uint256 ksKey, CoinbaseSmartWallet.KeyspaceKeyType ksKeyType, uint256 nonce)
+    function getAddress(uint256 ksID, uint256 nonce)
         external
         view
         returns (address)
     {
-        return LibClone.predictDeterministicAddress(initCodeHash(), _getSalt(ksKey, ksKeyType, nonce), address(this));
+        return LibClone.predictDeterministicAddress(initCodeHash(), _getSalt(ksID, nonce), address(this));
     }
 
     /// @notice Returns the initialization code hash of the account:
@@ -79,16 +77,15 @@ contract CoinbaseSmartWalletFactory {
 
     /// @notice Returns the create2 salt for `LibClone.predictDeterministicAddress`
     ///
-    /// @param ksKey     The Keyspace key.
-    /// @param ksKeyType The Keyspace key type.
+    /// @param ksID     The Keyspace ID.
     /// @param nonce     The nonce provided to `createAccount()`.
     ///
     /// @return The computed salt.
-    function _getSalt(uint256 ksKey, CoinbaseSmartWallet.KeyspaceKeyType ksKeyType, uint256 nonce)
+    function _getSalt(uint256 ksID,  uint256 nonce)
         internal
         pure
         returns (bytes32)
     {
-        return keccak256(abi.encode(ksKey, ksKeyType, nonce));
+        return keccak256(abi.encode(ksID, nonce));
     }
 }
