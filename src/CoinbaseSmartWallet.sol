@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.23;
+pragma solidity ^0.8.23;
 
 import {IAccount} from "account-abstraction/interfaces/IAccount.sol";
 
@@ -10,7 +10,8 @@ import {UUPSUpgradeable} from "solady/utils/UUPSUpgradeable.sol";
 import {WebAuthn} from "webauthn-sol/WebAuthn.sol";
 
 import {BridgedKeystore} from "keyspace-v2/BridgedKeystore.sol";
-import {CoinbaseSmartWalletRecordController} from "./CoinbaseSmartWalletRecordController.sol";
+import {LibCoinbaseSmartWalletRecord} from "./LibCoinbaseSmartWalletRecord.sol";
+import {CoinbaseSmartWalletAggregator} from "./CoinbaseSmartWalletAggregator.sol";
 
 import {ERC1271} from "./ERC1271.sol";
 
@@ -18,7 +19,7 @@ import {ERC1271} from "./ERC1271.sol";
 ///
 /// @custom:storage-location erc7201:coinbase.storage.CoinbaseSmartWalletStorage
 struct CoinbaseSmartWalletStorage {
-    uint256 ksID;
+    bytes32 ksID;
 }
 
 /// @title Coinbase Smart Wallet
@@ -60,22 +61,12 @@ contract CoinbaseSmartWallet is ERC1271, IAccount, UUPSUpgradeable, Receiver {
     bytes32 private constant COINBASE_SMART_WALLET_LOCATION =
         0x99a34bffa68409ea583717aeb46691b092950ed596c79c2fc789604435b66c00;
 
-    /// @notice Reserved nonce key (upper 192 bits of `UserOperation.nonce`) for cross-chain replayable
-    ///         transactions.
-    ///
-    /// @dev MUST BE the `UserOperation.nonce` key when `UserOperation.calldata` is calling
-    ///      `executeWithoutChainIdValidation`and MUST NOT BE `UserOperation.nonce` key when `UserOperation.calldata` is
-    ///      NOT calling `executeWithoutChainIdValidation`.
-    ///
-    /// @dev Helps enforce sequential sequencing of replayable transactions.
-    uint256 public constant REPLAYABLE_NONCE_KEY = 8453;
-
     /// @notice The BridgedKeystore used to prove the current configuration of the wallet.
     BridgedKeystore public immutable keystore;
-    
-    /// @notice The Keyspace record controller used to authorize signatures.
-    CoinbaseSmartWalletRecordController public immutable controller;
 
+    /// @notice The aggregator used to validate the signatures of the UserOperations.
+    CoinbaseSmartWalletAggregator public immutable aggregator;
+    
     /// @notice Thrown when `initialize` is called but the account has already been initialized.
     error Initialized();
 
@@ -87,14 +78,6 @@ contract CoinbaseSmartWallet is ERC1271, IAccount, UUPSUpgradeable, Receiver {
     ///
     /// @param selector The selector of the call.
     error SelectorNotAllowed(bytes4 selector);
-
-    /// @notice Thrown in validateUserOp if the key of `UserOperation.nonce` does not match the calldata.
-    ///
-    /// @dev Calls to `this.executeWithoutChainIdValidation` MUST use `REPLAYABLE_NONCE_KEY` and
-    ///      calls NOT to `this.executeWithoutChainIdValidation` MUST NOT use `REPLAYABLE_NONCE_KEY`.
-    ///
-    /// @param key The invalid `UserOperation.nonce` key.
-    error InvalidNonceKey(uint256 key);
 
     /// @notice Thrown when trying to register a Keyspace with with type `KeyspaceKeyType.None` type.
     error KeyspaceKeyTypeCantBeNone();
@@ -143,10 +126,12 @@ contract CoinbaseSmartWallet is ERC1271, IAccount, UUPSUpgradeable, Receiver {
         }
     }
 
-    constructor(address keystore_, address controller_) {
+    constructor(address keystore_, address aggregator_) {
         // Set the immutable variables that will be used by all proxies pointing to this implementation.
         keystore = BridgedKeystore(keystore_);
-        controller = CoinbaseSmartWalletRecordController(controller_);
+        aggregator = CoinbaseSmartWalletAggregator(aggregator_);
+        // Prevent the implementation from being initialized.
+        _getCoinbaseSmartWalletStorage().ksID = bytes32(uint256(1));
     }
 
     /// @notice Initializes the account.
@@ -154,8 +139,7 @@ contract CoinbaseSmartWallet is ERC1271, IAccount, UUPSUpgradeable, Receiver {
     /// @dev Reverts if the account has already been initialized.
     ///
     /// @param ksID     The Keyspace ID.
-    /// @param ksKeyType The Keyspace key type.
-    function initialize(uint256 ksID) external payable virtual {
+    function initialize(bytes32 ksID) external payable virtual {
         if (_getCoinbaseSmartWalletStorage().ksID != 0) {
             revert Initialized();
         }
@@ -188,26 +172,7 @@ contract CoinbaseSmartWallet is ERC1271, IAccount, UUPSUpgradeable, Receiver {
         payPrefund(missingAccountFunds)
         returns (uint256 validationData)
     {
-        uint256 key = userOp.nonce >> 64;
-
-        if (bytes4(userOp.callData) == this.executeWithoutChainIdValidation.selector) {
-            userOpHash = getUserOpHashWithoutChainId(userOp);
-            if (key != REPLAYABLE_NONCE_KEY) {
-                revert InvalidNonceKey(key);
-            }
-        } else {
-            if (key == REPLAYABLE_NONCE_KEY) {
-                revert InvalidNonceKey(key);
-            }
-        }
-
-        // Return 0 if signature is valid.
-        if (_isValidSignature(userOpHash, userOp.signature)) {
-            return 0;
-        }
-
-        // Else return 1
-        return 1;
+        return uint160(address(aggregator));
     }
 
     /// @notice Executes `calls` on this account (i.e. self call).
@@ -266,18 +231,6 @@ contract CoinbaseSmartWallet is ERC1271, IAccount, UUPSUpgradeable, Receiver {
         return 0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789;
     }
 
-    /// @notice Computes the hash of the `UserOperation` in the same way as EntryPoint v0.6, but
-    ///         leaves out the chain ID.
-    ///
-    /// @dev This allows accounts to sign a hash that can be used on many chains.
-    ///
-    /// @param userOp The `UserOperation` to compute the hash for.
-    ///
-    /// @return The `UserOperation` hash, which does not depend on chain ID.
-    function getUserOpHashWithoutChainId(UserOperation calldata userOp) public view virtual returns (bytes32) {
-        return keccak256(abi.encode(UserOperationLib.hash(userOp), entryPoint()));
-    }
-
     /// @notice Returns the implementation of the ERC1967 proxy.
     ///
     /// @return $ The address of implementation contract.
@@ -285,6 +238,13 @@ contract CoinbaseSmartWallet is ERC1271, IAccount, UUPSUpgradeable, Receiver {
         assembly {
             $ := sload(_ERC1967_IMPLEMENTATION_SLOT)
         }
+    }
+
+    /// @notice Retrieves the keystore ID associated with the Coinbase Smart Wallet.
+    /// @dev This function fetches the keystore ID from the Coinbase Smart Wallet storage.
+    /// @return ksID The keystore ID as a uint256.
+    function keystoreID() public view returns (bytes32) {
+        return _getCoinbaseSmartWalletStorage().ksID;
     }
 
     /// @notice Returns whether `functionSelector` can be called in `executeWithoutChainIdValidation`.
@@ -328,18 +288,17 @@ contract CoinbaseSmartWallet is ERC1271, IAccount, UUPSUpgradeable, Receiver {
     /// @param signature ABI encoded `SignatureWrapper`.
     function _isValidSignature(bytes32 h, bytes calldata signature) internal view virtual override returns (bool) {
         // Decode the raw `signature`.
-        (bytes memory sig, bytes memory recordValue, bytes memory keystoreStorageRootProof, bytes[] memory confirmedValueHashStorageProof) =
-            abi.decode(signature, (bytes, bytes, bytes, bytes[]));
+        (bytes memory sig, bytes memory recordValue, bytes[] memory confirmedValueHashStorageProof) =
+            abi.decode(signature, (bytes, bytes, bytes[]));
 
         if (!keystore.isValueHashCurrent(
                 _getCoinbaseSmartWalletStorage().ksID,
                 keccak256(recordValue),
-                keystoreStorageRootProof,
                 confirmedValueHashStorageProof)) {
             return false;
         }
 
-        return controller.isValidSignature(h, sig, recordValue);
+        return LibCoinbaseSmartWalletRecord.isValidSignatureMemory(h, sig, recordValue);
     }
 
     /// @inheritdoc UUPSUpgradeable

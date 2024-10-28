@@ -7,7 +7,6 @@ import {UserOperation} from "account-abstraction/interfaces/UserOperation.sol";
 import {UUPSUpgradeable} from "solady/utils/UUPSUpgradeable.sol";
 
 import {IKeyStore} from "../../src/ext/IKeyStore.sol";
-import {IVerifier} from "../../src/ext/IVerifier.sol";
 
 import {CoinbaseSmartWallet} from "../../src/CoinbaseSmartWallet.sol";
 import {CoinbaseSmartWalletFactory} from "../../src/CoinbaseSmartWalletFactory.sol";
@@ -91,7 +90,7 @@ contract CoinbaseSmartWalletTest is Test {
             userOp.callData = abi.encodeWithSelector(CoinbaseSmartWallet.executeWithoutChainIdValidation.selector);
 
             key = userOp.nonce >> 64;
-            if (key == sut.REPLAYABLE_NONCE_KEY()) {
+            if (key == 8453) {
                 key += 1;
             }
             userOp.nonce = key << 64 | uint256(uint64(userOp.nonce));
@@ -113,7 +112,7 @@ contract CoinbaseSmartWalletTest is Test {
         {
             userOp.callData = abi.encodeWithSelector(CoinbaseSmartWallet.execute.selector);
 
-            key = sut.REPLAYABLE_NONCE_KEY();
+            key = 8453;
             userOp.nonce = key << 64 | uint256(uint64(userOp.nonce));
         }
 
@@ -540,7 +539,6 @@ contract CoinbaseSmartWalletTest is Test {
             LibCoinbaseSmartWallet.publicInputs({w: wallet, ksKey: ksKey, stateRoot: stateRoot});
 
         vm.expectCall({callee: keyStore, data: abi.encodeWithSelector(IKeyStore.root.selector)});
-        vm.expectCall({callee: stateVerifier, data: abi.encodeCall(IVerifier.Verify, (proof, publicInputs))});
 
         if (sigBuilder == LibCoinbaseSmartWallet.eip1271Signature) {
             vm.expectCall({callee: wallet.addr, data: abi.encodeWithSelector(ERC1271.isValidSignature.selector)});

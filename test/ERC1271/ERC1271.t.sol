@@ -6,7 +6,6 @@ import "forge-std/Test.sol";
 import {CoinbaseSmartWallet} from "../../src/CoinbaseSmartWallet.sol";
 import {ERC1271} from "../../src/ERC1271.sol";
 import {IKeyStore} from "../../src/ext/IKeyStore.sol";
-import {IVerifier} from "../../src/ext/IVerifier.sol";
 
 import {LibCoinbaseSmartWallet} from "../utils/LibCoinbaseSmartWallet.sol";
 
@@ -202,7 +201,6 @@ contract ERC1271Test is Test {
             LibCoinbaseSmartWallet.publicInputs({w: wallet, ksKey: ksKey, stateRoot: stateRoot});
 
         vm.expectCall({callee: keyStore, data: abi.encodeWithSelector(IKeyStore.root.selector)});
-        vm.expectCall({callee: stateVerifier, data: abi.encodeCall(IVerifier.Verify, (proof, publicInputs))});
 
         if (isValidProof == true && sigBuilder == LibCoinbaseSmartWallet.eip1271Signature) {
             console.log("OK1");

@@ -6,8 +6,11 @@ import {BlockHeader} from "keyspace-v2/libs/BlockLib.sol";
 import {SignatureCheckerLib} from "solady/utils/SignatureCheckerLib.sol";
 import {WebAuthn} from "webauthn-sol/WebAuthn.sol";
 
+import {LibCoinbaseSmartWalletRecord} from "./LibCoinbaseSmartWalletRecord.sol";
+
 struct CoinbaseSmartWalletRecordData {
     bytes[] signers;
+    bytes sidecar;
 }
 
 struct SignatureWrapper {
@@ -18,7 +21,7 @@ struct SignatureWrapper {
     bytes signatureData;
 }
 
-contract CoinbaseSmartWalletRecordController is IRecordController {
+contract CoinbaseSmartWalletRecordController /* is IRecordController */ {
     /// @notice Thrown when a provided owner is neither 64 bytes long (for public key)
     ///         nor a ABI encoded address.
     ///
@@ -51,36 +54,7 @@ contract CoinbaseSmartWalletRecordController is IRecordController {
         bytes calldata proof
     ) external view returns (bool) {
         bytes32 hash = keccak256(abi.encodePacked(id, newValueHash));
-        return isValidSignature(hash, proof, currentValue);
-    }
-
-    function isValidSignature(bytes32 hash, bytes calldata signature, bytes calldata recordValue) public view returns (bool) {
-        CoinbaseSmartWalletRecordData memory data = abi.decode(currentValue, (CoinbaseSmartWalletRecordData));
-        SignatureWrapper memory sigWrapper = abi.decode(signature, (SignatureWrapper));
-        bytes memory ownerBytes = data.signers[sigWrapper.ownerIndex];
-
-        if (ownerBytes.length == 32) {
-            if (uint256(bytes32(ownerBytes)) > type(uint160).max) {
-                revert InvalidEthereumAddressOwner(ownerBytes);
-            }
-
-            address owner;
-            assembly ("memory-safe") {
-                owner := mload(add(ownerBytes, 32))
-            }
-
-            return SignatureCheckerLib.isValidSignatureNow(owner, hash, sigWrapper.signatureData);
-        }
-
-        if (ownerBytes.length == 64) {
-            (uint256 x, uint256 y) = abi.decode(ownerBytes, (uint256, uint256));
-
-            WebAuthn.WebAuthnAuth memory auth = abi.decode(sigWrapper.signatureData, (WebAuthn.WebAuthnAuth));
-
-            return WebAuthn.verify({challenge: abi.encode(hash), requireUV: false, webAuthnAuth: auth, x: x, y: y});
-        }
-
-        revert InvalidOwnerBytesLength(ownerBytes);
+        return LibCoinbaseSmartWalletRecord.isValidSignature(hash, proof, currentValue);
     }
 }
 

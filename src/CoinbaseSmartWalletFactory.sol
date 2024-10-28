@@ -37,14 +37,14 @@ contract CoinbaseSmartWalletFactory {
     ///
     /// @return account The address of the ERC-1967 proxy created with inputs `ksID`, `nonce`, and
     ///                 `this.implementation`.
-    function createAccount(uint256 ksID, uint256 nonce)
+    function createAccount(bytes32 ksID, uint256 nonce)
         external
         payable
         virtual
         returns (CoinbaseSmartWallet account)
     {
         (bool alreadyDeployed, address accountAddress) =
-            LibClone.createDeterministicERC1967(msg.value, implementation, _getSalt(ksKey, nonce));
+            LibClone.createDeterministicERC1967(msg.value, implementation, _getSalt(ksID, nonce));
 
         account = CoinbaseSmartWallet(payable(accountAddress));
 
@@ -59,7 +59,7 @@ contract CoinbaseSmartWalletFactory {
     /// @param nonce     The nonce provided to `createAccount()`.
     ///
     /// @return The predicted account deployment address.
-    function getAddress(uint256 ksID, uint256 nonce)
+    function getAddress(bytes32 ksID, uint256 nonce)
         external
         view
         returns (address)
@@ -81,7 +81,7 @@ contract CoinbaseSmartWalletFactory {
     /// @param nonce     The nonce provided to `createAccount()`.
     ///
     /// @return The computed salt.
-    function _getSalt(uint256 ksID,  uint256 nonce)
+    function _getSalt(bytes32 ksID,  uint256 nonce)
         internal
         pure
         returns (bytes32)

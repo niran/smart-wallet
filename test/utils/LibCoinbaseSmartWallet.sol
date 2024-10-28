@@ -12,7 +12,6 @@ import {WebAuthn} from "webauthn-sol/WebAuthn.sol";
 import {CoinbaseSmartWallet} from "../../src/CoinbaseSmartWallet.sol";
 import {ERC1271} from "../../src/ERC1271.sol";
 import {IKeyStore} from "../../src/ext/IKeyStore.sol";
-import {IVerifier} from "../../src/ext/IVerifier.sol";
 
 enum ProofVerificationOutput {
     Reverts,
@@ -67,22 +66,6 @@ library LibCoinbaseSmartWallet {
         vm.mockCallRevert({
             callee: keyStore,
             data: abi.encodeWithSelector(IKeyStore.root.selector),
-            revertData: revertData
-        });
-    }
-
-    function mockStateVerifier(address stateVerifier, bool value) internal {
-        vm.mockCall({
-            callee: stateVerifier,
-            data: abi.encodeWithSelector(IVerifier.Verify.selector),
-            returnData: abi.encode(value)
-        });
-    }
-
-    function mockRevertKeyStateVerifier(address stateVerifier, bytes memory revertData) internal {
-        vm.mockCallRevert({
-            callee: stateVerifier,
-            data: abi.encodeWithSelector(IVerifier.Verify.selector),
             revertData: revertData
         });
     }
@@ -152,12 +135,12 @@ library LibCoinbaseSmartWallet {
     {
         // Force the key to be REPLAYABLE_NONCE_KEY when calling `executeWithoutChainIdValidation`
         if (bytes4(userOp.callData) == CoinbaseSmartWallet.executeWithoutChainIdValidation.selector) {
-            nonce = sut.REPLAYABLE_NONCE_KEY() << 64 | uint256(uint64(userOp.nonce));
+            nonce = 8453 << 64 | uint256(uint64(userOp.nonce));
         }
         // Else ensure the key is NOT REPLAYABLE_NONCE_KEY.
         else {
             uint256 key = userOp.nonce >> 64;
-            if (key == sut.REPLAYABLE_NONCE_KEY()) {
+            if (key == 8453) {
                 key += 1;
             }
 
