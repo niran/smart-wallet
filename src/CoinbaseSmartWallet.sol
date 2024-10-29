@@ -10,7 +10,7 @@ import {UUPSUpgradeable} from "solady/utils/UUPSUpgradeable.sol";
 import {WebAuthn} from "webauthn-sol/WebAuthn.sol";
 
 import {BridgedKeystore} from "keyspace-v2/BridgedKeystore.sol";
-import {LibCoinbaseSmartWalletRecord} from "./LibCoinbaseSmartWalletRecord.sol";
+import {LibCoinbaseSmartWalletRecord, UserOpSignature} from "./LibCoinbaseSmartWalletRecord.sol";
 import {CoinbaseSmartWalletAggregator} from "./CoinbaseSmartWalletAggregator.sol";
 
 import {ERC1271} from "./ERC1271.sol";
@@ -172,7 +172,20 @@ contract CoinbaseSmartWallet is ERC1271, IAccount, UUPSUpgradeable, Receiver {
         payPrefund(missingAccountFunds)
         returns (uint256 validationData)
     {
-        return uint160(address(aggregator));
+        // ERC 4337 aggregators are the path forward for bundlers to support Keyspace transactions
+        // without needing to configure exceptions for them, but aggregators aren't widely supported
+        // yet. We allow the userOp signature to indicate whether the aggregator should be used.
+        UserOpSignature memory signature =
+            abi.decode(userOp.signature, (UserOpSignature));
+        if (signature.useAggregator) {
+            return uint160(address(aggregator));
+        } else {
+            if (LibCoinbaseSmartWalletRecord.isValidUserOp(userOp, keystore)) {
+                return 0;
+            } else {
+                return 1;
+            }
+        }
     }
 
     /// @notice Executes `calls` on this account (i.e. self call).
@@ -279,8 +292,10 @@ contract CoinbaseSmartWallet is ERC1271, IAccount, UUPSUpgradeable, Receiver {
 
     /// @inheritdoc ERC1271
     ///
-    /// @dev Used by both `ERC1271.isValidSignature` AND `IAccount.validateUserOp` signature validation.
-    /// @dev `signature` should be the resutlf of: `abi.encode(sig, publicKeyX, publicKeyY, stateProof)`
+    /// @dev Used by `ERC1271.isValidSignature` signature validation. This is simpler than our 
+    ///      IAccount.validateUserOp implementation because no aggregator can be involved and storage
+    ///      access is unlimited.
+    /// @dev `signature` should be the resutlf of: `abi.encode(sig, recordValue, confirmedValueHashStorageProof)`.
     //       The content of `sig` depends on the Keyspace key type:
     ///         - For Secp256k1 key type `sig` should be `abi.encodePacked(r, s, v)`
     ///         - For WebAuthn key type `sig` should be `abi.encode(WebAuthnAuth)`
@@ -298,7 +313,7 @@ contract CoinbaseSmartWallet is ERC1271, IAccount, UUPSUpgradeable, Receiver {
             return false;
         }
 
-        return LibCoinbaseSmartWalletRecord.isValidSignatureMemory(h, sig, recordValue);
+        return LibCoinbaseSmartWalletRecord.isValidSignature(h, sig, recordValue);
     }
 
     /// @inheritdoc UUPSUpgradeable

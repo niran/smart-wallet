@@ -54,7 +54,7 @@ contract CoinbaseSmartWalletRecordController /* is IRecordController */ {
         bytes calldata proof
     ) external view returns (bool) {
         bytes32 hash = keccak256(abi.encodePacked(id, newValueHash));
-        return LibCoinbaseSmartWalletRecord.isValidSignature(hash, proof, currentValue);
+        return LibCoinbaseSmartWalletRecord.isValidSignatureCalldata(hash, proof, currentValue);
     }
 }
 

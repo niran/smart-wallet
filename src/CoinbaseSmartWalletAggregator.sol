@@ -33,8 +33,8 @@ contract CoinbaseSmartWalletAggregator is IAggregator {
     ///         latest keystore storage root.
     error ValueHashMismatch(bytes32 ksID, bytes32 valueHash);
 
-    /// @notice Thrown in validateUserOpSignature if the signature is invalid.
-    error InvalidSignature(bytes32 userOpHash);
+    /// @notice Thrown in validateUserOpSignature if the userOp is invalid.
+    error InvalidUserOp();
 
     /// @notice The BridgedKeystore used to prove the current configuration of the wallet.
     BridgedKeystore public immutable keystore;
@@ -64,32 +64,7 @@ contract CoinbaseSmartWalletAggregator is IAggregator {
     /// @return sigForUserOp The value to put into the signature field of the userOp when calling handleOps.
     ///                      (Usually empty for BLS-style aggregators, but for this aggregator it's the same as the input)
     function validateUserOpSignature(UserOperation calldata userOp) public view returns (bytes memory sigForUserOp) {
-        uint256 key = userOp.nonce >> 64;
-
-        bytes32 userOpHash;
-        if (bytes4(userOp.callData) == CoinbaseSmartWallet.executeWithoutChainIdValidation.selector) {
-            userOpHash = getUserOpHashWithoutChainId(userOp);
-            if (key != REPLAYABLE_NONCE_KEY) {
-                revert InvalidNonceKey(key);
-            }
-        } else {
-            userOpHash = UserOperationLib.hash(userOp);
-            if (key == REPLAYABLE_NONCE_KEY) {
-                revert InvalidNonceKey(key);
-            }
-        }
-
-        (bytes memory sig, bytes memory recordValue, bytes[] memory confirmedValueHashStorageProof) =
-            abi.decode(userOp.signature, (bytes, bytes, bytes[]));
-
-        bytes32 ksID = CoinbaseSmartWallet(payable(userOp.sender)).keystoreID();
-        bytes32 valueHash = keccak256(recordValue);
-        require(
-            keystore.isValueHashCurrent(ksID, valueHash, confirmedValueHashStorageProof),
-            ValueHashMismatch(ksID, valueHash)
-        );
-
-        require(LibCoinbaseSmartWalletRecord.isValidSignatureMemory(userOpHash, sig, recordValue), InvalidSignature(userOpHash));
+        require(LibCoinbaseSmartWalletRecord.isValidUserOp(userOp, keystore), InvalidUserOp());
 
         return userOp.signature;
     }
