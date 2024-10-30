@@ -21,7 +21,7 @@ struct SignatureWrapper {
     bytes signatureData;
 }
 
-contract CoinbaseSmartWalletRecordController /* is IRecordController */ {
+contract CoinbaseSmartWalletRecordController is IRecordController {
     /// @notice Thrown when a provided owner is neither 64 bytes long (for public key)
     ///         nor a ABI encoded address.
     ///

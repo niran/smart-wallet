@@ -8,12 +8,12 @@ import {Vm} from "forge-std/Vm.sol";
 import {Base64} from "openzeppelin-contracts/contracts/utils/Base64.sol";
 import {UUPSUpgradeable} from "solady/utils/UUPSUpgradeable.sol";
 import {WebAuthn} from "webauthn-sol/WebAuthn.sol";
+import {BridgedKeystore} from "keyspace-v2/BridgedKeystore.sol";
 
 import {CoinbaseSmartWallet} from "../../src/CoinbaseSmartWallet.sol";
 import {ERC1271} from "../../src/ERC1271.sol";
-import {IKeyStore} from "../../src/ext/IKeyStore.sol";
 
-enum ProofVerificationOutput {
+enum KeystoreOutput {
     Reverts,
     Fails,
     Succeeds
@@ -31,12 +31,10 @@ library LibCoinbaseSmartWallet {
 
     function uninitialize(address target) internal {
         vm.store(target, COINBASE_SMART_WALLET_LOCATION, bytes32(0));
-        vm.store(target, bytes32(uint256(COINBASE_SMART_WALLET_LOCATION) + 1), bytes32(0));
     }
 
-    function initialize(address target, uint256 ksKey, CoinbaseSmartWallet.KeyspaceKeyType ksKeyType) internal {
-        vm.store(target, COINBASE_SMART_WALLET_LOCATION, bytes32(ksKey));
-        vm.store(target, bytes32(uint256(COINBASE_SMART_WALLET_LOCATION) + 1), bytes32(uint256(ksKeyType)));
+    function initialize(address target, bytes32 ksID) internal {
+        vm.store(target, COINBASE_SMART_WALLET_LOCATION, bytes32(ksID));
     }
 
     function readEip1967ImplementationSlot(address target) internal view returns (address) {
@@ -54,18 +52,46 @@ library LibCoinbaseSmartWallet {
         vm.mockCall({callee: signer, data: abi.encodeWithSelector(ERC1271.isValidSignature.selector), returnData: res});
     }
 
-    function mockKeyStore(address keyStore, uint256 root) internal {
+    function mockKeystore(address keystore, uint256 root) internal {
         vm.mockCall({
-            callee: keyStore,
-            data: abi.encodeWithSelector(IKeyStore.root.selector),
+            callee: keystore,
+            data: abi.encodeWithSelector(BridgedKeystore(keystore).keystoreStorageRoot.selector),
             returnData: abi.encode(root)
         });
     }
 
-    function mockRevertKeyStore(address keyStore, bytes memory revertData) internal {
+    function mockRevertKeystore(address keystore, bytes memory revertData) internal {
         vm.mockCallRevert({
-            callee: keyStore,
-            data: abi.encodeWithSelector(IKeyStore.root.selector),
+            callee: keystore,
+            data: abi.encodeWithSelector(BridgedKeystore(keystore).keystoreStorageRoot.selector),
+            revertData: revertData
+        });
+    }
+
+    function mockIsValueHashCurrent(address keystore, bytes32 ksID, bytes32 valueHash, bytes memory proof, bool result) internal {
+        vm.mockCall({
+            callee: keystore,
+            data: abi.encodeWithSelector(
+                BridgedKeystore(keystore).isValueHashCurrent.selector,
+                ksID,
+                valueHash,
+                proof
+            ),
+            returnData: abi.encode(result)
+        });
+    }
+
+    function mockRevertIsValueHashCurrent(address keystore, bytes32 ksID, bytes32 valueHash, bytes memory proof, bytes memory revertData)
+        internal
+    {
+        vm.mockCallRevert({
+            callee: keystore,
+            data: abi.encodeWithSelector(
+                BridgedKeystore(keystore).isValueHashCurrent.selector,
+                ksID,
+                valueHash,
+                proof
+            ),
             revertData: revertData
         });
     }
@@ -210,22 +236,6 @@ library LibCoinbaseSmartWallet {
 
         bytes memory sig = abi.encode(webAuthn);
         sigData = abi.encode(sig, w.publicKeyX, w.publicKeyY, stateProof);
-    }
-
-    function publicInputs(Vm.Wallet memory w, uint256 ksKey, uint256 stateRoot)
-        internal
-        pure
-        returns (uint256[] memory publicInputs_)
-    {
-        // Verify the state proof.
-        uint256[] memory data = new uint256[](8);
-        data[0] = w.publicKeyX;
-        data[1] = w.publicKeyY;
-
-        publicInputs_ = new uint256[](3);
-        publicInputs_[0] = ksKey;
-        publicInputs_[1] = stateRoot;
-        publicInputs_[2] = uint256(keccak256(abi.encodePacked(data)) >> 8);
     }
 
     function isApprovedSelector(bytes4 selector) internal pure returns (bool) {

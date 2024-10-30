@@ -11,24 +11,6 @@ import {LibCoinbaseSmartWalletRecord} from "./LibCoinbaseSmartWalletRecord.sol";
 
 
 contract CoinbaseSmartWalletAggregator is IAggregator {
-    /// @notice Reserved nonce key (upper 192 bits of `UserOperation.nonce`) for cross-chain replayable
-    ///         transactions.
-    ///
-    /// @dev MUST BE the `UserOperation.nonce` key when `UserOperation.calldata` is calling
-    ///      `executeWithoutChainIdValidation`and MUST NOT BE `UserOperation.nonce` key when `UserOperation.calldata` is
-    ///      NOT calling `executeWithoutChainIdValidation`.
-    ///
-    /// @dev Helps enforce sequential sequencing of replayable transactions.
-    uint256 public constant REPLAYABLE_NONCE_KEY = 8453;
-
-    /// @notice Thrown in validateUserOpSignature if the key of `UserOperation.nonce` does not match the calldata.
-    ///
-    /// @dev Calls to `this.executeWithoutChainIdValidation` MUST use `REPLAYABLE_NONCE_KEY` and
-    ///      calls NOT to `this.executeWithoutChainIdValidation` MUST NOT use `REPLAYABLE_NONCE_KEY`.
-    ///
-    /// @param key The invalid `UserOperation.nonce` key.
-    error InvalidNonceKey(uint256 key);
-
     /// @notice Thrown in validateUserOpSignature if the value hash of the record cannot be proven against the 
     ///         latest keystore storage root.
     error ValueHashMismatch(bytes32 ksID, bytes32 valueHash);
@@ -64,7 +46,7 @@ contract CoinbaseSmartWalletAggregator is IAggregator {
     /// @return sigForUserOp The value to put into the signature field of the userOp when calling handleOps.
     ///                      (Usually empty for BLS-style aggregators, but for this aggregator it's the same as the input)
     function validateUserOpSignature(UserOperation calldata userOp) public view returns (bytes memory sigForUserOp) {
-        require(LibCoinbaseSmartWalletRecord.isValidUserOp(userOp, keystore), InvalidUserOp());
+        require(LibCoinbaseSmartWalletRecord.isValidUserOp(userOp, address(keystore)), InvalidUserOp());
 
         return userOp.signature;
     }
@@ -80,17 +62,5 @@ contract CoinbaseSmartWalletAggregator is IAggregator {
     /// @return aggregatedSignature The aggregated signature.
     function aggregateSignatures(UserOperation[] calldata userOps) external view returns (bytes memory aggregatedSignature) {
         return bytes("");
-    }
-
-    /// @notice Computes the hash of the `UserOperation` in the same way as EntryPoint v0.6, but
-    ///         leaves out the chain ID.
-    ///
-    /// @dev This allows accounts to sign a hash that can be used on many chains.
-    ///
-    /// @param userOp The `UserOperation` to compute the hash for.
-    ///
-    /// @return The `UserOperation` hash, which does not depend on chain ID.
-    function getUserOpHashWithoutChainId(UserOperation calldata userOp) public view virtual returns (bytes32) {
-        return keccak256(abi.encode(UserOperationLib.hash(userOp), CoinbaseSmartWallet(payable(userOp.sender)).entryPoint()));
     }
 }

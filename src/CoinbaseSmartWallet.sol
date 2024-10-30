@@ -180,7 +180,7 @@ contract CoinbaseSmartWallet is ERC1271, IAccount, UUPSUpgradeable, Receiver {
         if (signature.useAggregator) {
             return uint160(address(aggregator));
         } else {
-            if (LibCoinbaseSmartWalletRecord.isValidUserOp(userOp, keystore)) {
+            if (LibCoinbaseSmartWalletRecord.isValidUserOp(userOp, address(keystore))) {
                 return 0;
             } else {
                 return 1;

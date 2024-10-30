@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.27;
 
+import {UserOperation, UserOperationLib} from "account-abstraction/interfaces/UserOperation.sol";
 import {BlockHeader} from "keyspace-v2/libs/BlockLib.sol";
 import {BridgedKeystore} from "keyspace-v2/BridgedKeystore.sol";
 import {SignatureCheckerLib} from "solady/utils/SignatureCheckerLib.sol";
 import {WebAuthn} from "webauthn-sol/WebAuthn.sol";
+import {CoinbaseSmartWallet} from "./CoinbaseSmartWallet.sol";
 
 struct CoinbaseSmartWalletRecordData {
     bytes[] signers;
@@ -27,6 +29,24 @@ struct SignatureWrapper {
 }
 
 library LibCoinbaseSmartWalletRecord {
+    /// @notice Reserved nonce key (upper 192 bits of `UserOperation.nonce`) for cross-chain replayable
+    ///         transactions.
+    ///
+    /// @dev MUST BE the `UserOperation.nonce` key when `UserOperation.calldata` is calling
+    ///      `executeWithoutChainIdValidation`and MUST NOT BE `UserOperation.nonce` key when `UserOperation.calldata` is
+    ///      NOT calling `executeWithoutChainIdValidation`.
+    ///
+    /// @dev Helps enforce sequential sequencing of replayable transactions.
+    uint256 public constant REPLAYABLE_NONCE_KEY = 8453;
+
+    /// @notice Thrown in validateUserOpSignature if the key of `UserOperation.nonce` does not match the calldata.
+    ///
+    /// @dev Calls to `this.executeWithoutChainIdValidation` MUST use `REPLAYABLE_NONCE_KEY` and
+    ///      calls NOT to `this.executeWithoutChainIdValidation` MUST NOT use `REPLAYABLE_NONCE_KEY`.
+    ///
+    /// @param key The invalid `UserOperation.nonce` key.
+    error InvalidNonceKey(uint256 key);
+
     /// @notice Thrown when a provided owner is neither 64 bytes long (for public key)
     ///         nor a ABI encoded address.
     ///
@@ -105,12 +125,25 @@ library LibCoinbaseSmartWalletRecord {
 
         UserOpSignature memory signature = abi.decode(userOp.signature, (UserOpSignature));
         bytes32 ksID = CoinbaseSmartWallet(payable(userOp.sender)).keystoreID();
-        bytes32 valueHash = keccak256(recordValue);
+        bytes32 valueHash = keccak256(signature.recordValue);
         if (!BridgedKeystore(keystore).isValueHashCurrent(ksID, valueHash, signature.confirmedValueHashStorageProof)) {
             return false;
         }
 
         return isValidSignature(userOpHash, signature.sig, signature.recordValue);
+    }
+
+
+    /// @notice Computes the hash of the `UserOperation` in the same way as EntryPoint v0.6, but
+    ///         leaves out the chain ID.
+    ///
+    /// @dev This allows accounts to sign a hash that can be used on many chains.
+    ///
+    /// @param userOp The `UserOperation` to compute the hash for.
+    ///
+    /// @return The `UserOperation` hash, which does not depend on chain ID.
+    function getUserOpHashWithoutChainId(UserOperation calldata userOp) public view returns (bytes32) {
+        return keccak256(abi.encode(UserOperationLib.hash(userOp), CoinbaseSmartWallet(payable(userOp.sender)).entryPoint()));
     }
 }
 

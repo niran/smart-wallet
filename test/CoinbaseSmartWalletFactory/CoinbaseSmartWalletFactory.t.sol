@@ -15,7 +15,7 @@ contract CoinbaseSmartWalletFactoryTest is Test {
     CoinbaseSmartWalletFactory private sut;
 
     function setUp() public {
-        sw = new CoinbaseSmartWallet({keyStore_: address(0), stateVerifier_: address(0)});
+        sw = new CoinbaseSmartWallet({keystore_: address(0), aggregator_: address(0)});
         sut = new CoinbaseSmartWalletFactory(address(sw));
     }
 
@@ -23,9 +23,9 @@ contract CoinbaseSmartWalletFactoryTest is Test {
     //                                            MODIFIERS                                           //
     ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-    modifier withAccountDeployed(uint256 kskey, uint256 ksKeyType, uint256 nonce) {
+    modifier withAccountDeployed(bytes32 ksID, uint256 nonce) {
         address account =
-            sut.getAddress({ksKey: kskey, ksKeyType: LibCoinbaseSmartWallet.uintToKsKeyType(ksKeyType), nonce: nonce});
+            sut.getAddress({ksID: ksID, nonce: nonce});
         vm.etch({target: account, newRuntimeBytecode: "Some bytecode"});
 
         _;
@@ -38,39 +38,34 @@ contract CoinbaseSmartWalletFactoryTest is Test {
     /// @custom:test-section createAccount
 
     function test_createAccount_deploysTheAccount_whenNotAlreadyDeployed(
-        uint256 ksKey,
-        uint256 ksKeyType,
+        bytes32 ksID,
         uint256 nonce
     ) external {
         address account = address(
-            sut.createAccount({ksKey: ksKey, ksKeyType: LibCoinbaseSmartWallet.uintToKsKeyType(ksKeyType), nonce: nonce})
+            sut.createAccount({ksID: ksID, nonce: nonce})
         );
         assertTrue(account != address(0));
         assertGt(account.code.length, 0);
     }
 
     function test_createAccount_initializesTheAccount_whenNotAlreadyDeployed(
-        uint256 ksKey,
-        uint256 ksKeyType,
+        bytes32 ksID,
         uint256 nonce
     ) external {
-        CoinbaseSmartWallet.KeyspaceKeyType ksKeyType_ = LibCoinbaseSmartWallet.uintToKsKeyType(ksKeyType);
-
-        address expectedAccount = _create2Address({ksKey: ksKey, ksKeyType: ksKeyType_, nonce: nonce});
+        address expectedAccount = _create2Address({ksID: ksID, nonce: nonce});
         vm.expectCall({
             callee: expectedAccount,
-            data: abi.encodeCall(CoinbaseSmartWallet.initialize, (ksKey, ksKeyType_))
+            data: abi.encodeCall(CoinbaseSmartWallet.initialize, (ksID))
         });
-        sut.createAccount({ksKey: ksKey, ksKeyType: ksKeyType_, nonce: nonce});
+        sut.createAccount({ksID: ksID, nonce: nonce});
     }
 
     function test_createAccount_returnsTheAccountAddress_whenAlreadyDeployed(
-        uint256 ksKey,
-        uint256 ksKeyType,
+        bytes32 ksID,
         uint256 nonce
-    ) external withAccountDeployed(ksKey, ksKeyType, nonce) {
+    ) external withAccountDeployed(ksID, nonce) {
         address account = address(
-            sut.createAccount({ksKey: ksKey, ksKeyType: LibCoinbaseSmartWallet.uintToKsKeyType(ksKeyType), nonce: nonce})
+            sut.createAccount({ksID: ksID, nonce: nonce})
         );
         assertTrue(account != address(0));
         assertGt(account.code.length, 0);
@@ -78,13 +73,11 @@ contract CoinbaseSmartWalletFactoryTest is Test {
 
     /// @custom:test-section getAddress
 
-    function test_getAddress_returnsTheAccountCounterfactualAddress(uint256 ksKey, uint256 ksKeyType, uint256 nonce)
+    function test_getAddress_returnsTheAccountCounterfactualAddress(bytes32 ksID, uint256 nonce)
         external
     {
-        CoinbaseSmartWallet.KeyspaceKeyType ksKeyType_ = LibCoinbaseSmartWallet.uintToKsKeyType(ksKeyType);
-
-        address expectedAccountAddress = _create2Address({ksKey: ksKey, ksKeyType: ksKeyType_, nonce: nonce});
-        address accountAddress = sut.getAddress({ksKey: ksKey, ksKeyType: ksKeyType_, nonce: nonce});
+        address expectedAccountAddress = _create2Address({ksID: ksID, nonce: nonce});
+        address accountAddress = sut.getAddress({ksID: ksID, nonce: nonce});
 
         assertEq(accountAddress, expectedAccountAddress);
     }
@@ -99,23 +92,23 @@ contract CoinbaseSmartWalletFactoryTest is Test {
     //                                         TESTS HELPERS                                          //
     ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-    function _create2Address(uint256 ksKey, CoinbaseSmartWallet.KeyspaceKeyType ksKeyType, uint256 nonce)
+    function _create2Address(bytes32 ksID, uint256 nonce)
         private
         view
         returns (address)
     {
         return vm.computeCreate2Address({
-            salt: _getSalt({ksKey: ksKey, ksKeyType: ksKeyType, nonce: nonce}),
+            salt: _getSalt({ksID: ksID, nonce: nonce}),
             initCodeHash: LibClone.initCodeHashERC1967(address(sw)),
             deployer: address(sut)
         });
     }
 
-    function _getSalt(uint256 ksKey, CoinbaseSmartWallet.KeyspaceKeyType ksKeyType, uint256 nonce)
+    function _getSalt(bytes32 ksID, uint256 nonce)
         internal
         pure
         returns (bytes32)
     {
-        return keccak256(abi.encode(ksKey, ksKeyType, nonce));
+        return keccak256(abi.encode(ksID, nonce));
     }
 }
