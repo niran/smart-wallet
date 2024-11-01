@@ -15,7 +15,7 @@ struct CoinbaseSmartWalletRecordData {
 
 struct UserOpSignature {
     bytes sig;
-    bytes recordValue;
+    bytes recordData;
     bytes[] confirmedValueHashStorageProof;
     bool useAggregator;
 }
@@ -62,20 +62,20 @@ library LibCoinbaseSmartWalletRecord {
     ///
     /// @param hash The hash of the data that was signed.
     /// @param signature The signature data to verify.
-    /// @param recordValue The keystore record value containing the wallet configuration.
+    /// @param recordData The keystore record value containing the wallet configuration.
     ///
     /// @return bool True if the signature is valid, false otherwise.
     ///
     /// @dev Reverts with `InvalidEthereumAddressOwner` if the ownerBytes length is 32 but the address is invalid.
     /// @dev Reverts with `InvalidOwnerBytesLength` if the ownerBytes length is neither 32 nor 64.
-    function isValidSignatureCalldata(bytes32 hash, bytes calldata signature, bytes calldata recordValue) internal view returns (bool) {
-        CoinbaseSmartWalletRecordData memory data = abi.decode(recordValue, (CoinbaseSmartWalletRecordData));
+    function isValidSignatureCalldata(bytes32 hash, bytes calldata signature, bytes calldata recordData) internal view returns (bool) {
+        CoinbaseSmartWalletRecordData memory data = abi.decode(recordData, (CoinbaseSmartWalletRecordData));
         SignatureWrapper memory sigWrapper = abi.decode(signature, (SignatureWrapper));
         return isValidSignature(hash, sigWrapper, data);
     }
 
-    function isValidSignature(bytes32 hash, bytes memory signature, bytes memory recordValue) internal view returns (bool) {
-        CoinbaseSmartWalletRecordData memory data = abi.decode(recordValue, (CoinbaseSmartWalletRecordData));
+    function isValidSignature(bytes32 hash, bytes memory signature, bytes memory recordData) internal view returns (bool) {
+        CoinbaseSmartWalletRecordData memory data = abi.decode(recordData, (CoinbaseSmartWalletRecordData));
         SignatureWrapper memory sigWrapper = abi.decode(signature, (SignatureWrapper));
         return isValidSignature(hash, sigWrapper, data);
     }
@@ -107,17 +107,15 @@ library LibCoinbaseSmartWalletRecord {
         revert InvalidOwnerBytesLength(ownerBytes);
     }
 
-    function isValidUserOp(UserOperation calldata userOp, address keystore) public view returns (bool) {
+    function isValidUserOp(UserOperation calldata userOp, bytes32 userOpHash, address keystore) public view returns (bool) {
         uint256 key = userOp.nonce >> 64;
 
-        bytes32 userOpHash;
         if (bytes4(userOp.callData) == CoinbaseSmartWallet.executeWithoutChainIdValidation.selector) {
             userOpHash = getUserOpHashWithoutChainId(userOp);
             if (key != REPLAYABLE_NONCE_KEY) {
                 revert InvalidNonceKey(key);
             }
         } else {
-            userOpHash = UserOperationLib.hash(userOp);
             if (key == REPLAYABLE_NONCE_KEY) {
                 revert InvalidNonceKey(key);
             }
@@ -125,12 +123,18 @@ library LibCoinbaseSmartWalletRecord {
 
         UserOpSignature memory signature = abi.decode(userOp.signature, (UserOpSignature));
         bytes32 ksID = CoinbaseSmartWallet(payable(userOp.sender)).keystoreID();
-        bytes32 valueHash = keccak256(signature.recordValue);
-        if (!BridgedKeystore(keystore).isValueHashCurrent(ksID, valueHash, signature.confirmedValueHashStorageProof)) {
+        bytes32 valueHash = keccak256(signature.recordData);
+
+        bool isValueHashCurrent;
+        try BridgedKeystore(keystore).isValueHashCurrent(ksID, valueHash, signature.confirmedValueHashStorageProof) returns (bool result) {
+            isValueHashCurrent = result;
+        } catch {}
+
+        if (!isValueHashCurrent) {
             return false;
         }
 
-        return isValidSignature(userOpHash, signature.sig, signature.recordValue);
+        return isValidSignature(userOpHash, signature.sig, signature.recordData);
     }
 
 

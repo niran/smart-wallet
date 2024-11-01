@@ -116,7 +116,7 @@ contract CoinbaseSmartWalletTest is Test {
         sut.validateUserOp({userOp: userOp, userOpHash: userOpHash, missingAccountFunds: 0});
     }
 
-    function test_validateUserOp_returnsOne_whenStateProofVerifReverts(
+    function test_validateUserOp_returnsOne_whenIsValueHashCurrentReverts(
         bytes32 ksID,
         uint248 privateKey,
         UserOperation memory userOp
@@ -133,7 +133,7 @@ contract CoinbaseSmartWalletTest is Test {
         assertEq(validationData, 1);
     }
 
-    function test_validateUserOp_returnsOne_whenStateProofVerifFails(
+    function test_validateUserOp_returnsOne_whenIsValueHashCurrentFails(
         bytes32 ksID,
         uint248 privateKey,
         UserOperation memory userOp
@@ -496,7 +496,7 @@ contract CoinbaseSmartWalletTest is Test {
         // 3. Expect calls to the KeyStore and StateVerifier contracts.
         // 4. If using ERC1271 signature expect calls to `ERC1271.isValidSignature`.
 
-        function (Vm.Wallet memory , bytes32, bool , bytes memory )  returns(bytes memory) sigBuilder;
+        function (Vm.Wallet memory , bytes32, bool )  returns(bytes memory) sigBuilder;
         sigBuilder = LibCoinbaseSmartWallet.webAuthnSignature;
 
         Vm.Wallet memory wallet;
@@ -512,8 +512,6 @@ contract CoinbaseSmartWalletTest is Test {
             userOp: userOp
         });
 
-        vm.expectCall({callee: keystore, data: abi.encodeWithSelector(BridgedKeystore(keystore).keystoreStorageRoot.selector)});
-
         if (sigBuilder == LibCoinbaseSmartWallet.eip1271Signature) {
             vm.expectCall({callee: wallet.addr, data: abi.encodeWithSelector(ERC1271.isValidSignature.selector)});
         }
@@ -524,7 +522,7 @@ contract CoinbaseSmartWalletTest is Test {
         uint248 privateKey,
         KeystoreOutput keystoreOutput,
         bool isValidSig,
-        function (Vm.Wallet memory , bytes32, bool , bytes memory )  returns(bytes memory) sigBuilder,
+        function (Vm.Wallet memory , bytes32, bool )  returns(bytes memory) sigBuilder,
         UserOperation memory userOp
     ) private returns (Vm.Wallet memory wallet, bytes32 userOpHash, uint256 stateRoot, bytes memory proof) {
         // Setup test:
@@ -536,29 +534,26 @@ contract CoinbaseSmartWalletTest is Test {
         // 6. Set `userOp.signature` to a valid or invalid `signature` of `userOpHash` depending on `isValidSig`.
         //    NOTE: Invalid signatures are still correctly encoded.
 
-        proof = "STATE PROOF";
         stateRoot = 42;
 
         LibCoinbaseSmartWallet.mockKeystore({keystore: keystore, root: stateRoot});
         if (keystoreOutput == KeystoreOutput.Reverts) {
             LibCoinbaseSmartWallet.mockRevertIsValueHashCurrent({
                 keystore: keystore,
-                ksID: ksID, 
-                valueHash: 0,
-                proof: hex"",
                 revertData: "ISVALUEHASH REVERTS"
             });
         } else {
             bool isValueHashCurrent = keystoreOutput == KeystoreOutput.Succeeds;
-            LibCoinbaseSmartWallet.mockIsValueHashCurrent({keystore: keystore, ksID: ksID, valueHash: 0, proof: hex"", result: isValueHashCurrent});
+            LibCoinbaseSmartWallet.mockIsValueHashCurrent({keystore: keystore, result: isValueHashCurrent});
         }
 
         wallet = LibCoinbaseSmartWallet.passKeyWallet(privateKey);
 
         LibCoinbaseSmartWallet.initialize({target: address(sut), ksID: ksID});
 
+        userOp.sender = address(sut);
         userOp.nonce = LibCoinbaseSmartWallet.validNonceKey({sut: sut, userOp: userOp});
         userOpHash = LibCoinbaseSmartWallet.hashUserOp({sut: sut, userOp: userOp, forceChainId: false});
-        userOp.signature = sigBuilder(wallet, userOpHash, isValidSig, proof);
+        userOp.signature = sigBuilder(wallet, userOpHash, isValidSig);
     }
 }

@@ -11,7 +11,10 @@ import {WebAuthn} from "webauthn-sol/WebAuthn.sol";
 import {BridgedKeystore} from "keyspace-v2/BridgedKeystore.sol";
 
 import {CoinbaseSmartWallet} from "../../src/CoinbaseSmartWallet.sol";
+import {SignatureWrapper, CoinbaseSmartWalletRecordData, UserOpSignature} from "../../src/LibCoinbaseSmartWalletRecord.sol";
 import {ERC1271} from "../../src/ERC1271.sol";
+
+import {console} from "forge-std/Test.sol";
 
 enum KeystoreOutput {
     Reverts,
@@ -68,30 +71,20 @@ library LibCoinbaseSmartWallet {
         });
     }
 
-    function mockIsValueHashCurrent(address keystore, bytes32 ksID, bytes32 valueHash, bytes memory proof, bool result) internal {
+    function mockIsValueHashCurrent(address keystore, bool result) internal {
         vm.mockCall({
             callee: keystore,
-            data: abi.encodeWithSelector(
-                BridgedKeystore(keystore).isValueHashCurrent.selector,
-                ksID,
-                valueHash,
-                proof
-            ),
+            data: abi.encodeWithSelector(BridgedKeystore(keystore).isValueHashCurrent.selector),
             returnData: abi.encode(result)
         });
     }
 
-    function mockRevertIsValueHashCurrent(address keystore, bytes32 ksID, bytes32 valueHash, bytes memory proof, bytes memory revertData)
+    function mockRevertIsValueHashCurrent(address keystore, bytes memory revertData)
         internal
     {
         vm.mockCallRevert({
             callee: keystore,
-            data: abi.encodeWithSelector(
-                BridgedKeystore(keystore).isValueHashCurrent.selector,
-                ksID,
-                valueHash,
-                proof
-            ),
+            data: abi.encodeWithSelector(BridgedKeystore(keystore).isValueHashCurrent.selector),
             revertData: revertData
         });
     }
@@ -174,7 +167,7 @@ library LibCoinbaseSmartWallet {
         }
     }
 
-    function eoaSignature(Vm.Wallet memory w, bytes32 userOpHash, bool validSig, bytes memory stateProof)
+    function eoaSignature(Vm.Wallet memory w, bytes32 userOpHash, bool validSig)
         internal
         returns (bytes memory sigData)
     {
@@ -187,22 +180,22 @@ library LibCoinbaseSmartWallet {
         }
 
         sig = abi.encodePacked(r, s, v);
-        sigData = abi.encode(sig, w.publicKeyX, w.publicKeyY, stateProof);
+        bytes memory signer = abi.encode(w.addr);
+        sigData = _encodeUserOpSignature(w, sig, signer);
     }
 
-    function eip1271Signature(Vm.Wallet memory w, bytes32 userOpHash, bool validSig, bytes memory stateProof)
+    function eip1271Signature(Vm.Wallet memory w, bytes32 userOpHash, bool validSig)
         internal
         returns (bytes memory sigData)
     {
         bytes memory sig = bytes.concat("CUSTOM EIP1271 SIGNATURE: ", userOpHash);
-        sigData = abi.encode(sig, w.publicKeyX, w.publicKeyY, stateProof);
+        sigData = abi.encode(sig, w.publicKeyX, w.publicKeyY);
 
         mockEip1271({signer: w.addr, isValid: validSig});
     }
 
-    function webAuthnSignature(Vm.Wallet memory w, bytes32 userOpHash, bool validSig, bytes memory stateProof)
+    function webAuthnSignature(Vm.Wallet memory w, bytes32 userOpHash, bool validSig)
         internal
-        pure
         returns (bytes memory sigData)
     {
         string memory challengeb64url = Base64.encodeURL(abi.encode(userOpHash));
@@ -235,7 +228,32 @@ library LibCoinbaseSmartWallet {
         }
 
         bytes memory sig = abi.encode(webAuthn);
-        sigData = abi.encode(sig, w.publicKeyX, w.publicKeyY, stateProof);
+        bytes memory signer = abi.encode(w.publicKeyX, w.publicKeyY);
+        sigData = _encodeUserOpSignature(w, sig, signer);
+    }
+
+    function _encodeUserOpSignature(Vm.Wallet memory w, bytes memory sig, bytes memory signer)
+        internal
+        pure
+        returns (bytes memory)
+    {
+        SignatureWrapper memory sigWrapper = SignatureWrapper({
+            ownerIndex: 0,
+            signatureData: sig
+        });
+        bytes[] memory signers = new bytes[](1);
+        signers[0] = signer;
+        CoinbaseSmartWalletRecordData memory recordData = CoinbaseSmartWalletRecordData({
+            signers: signers,
+            sidecar: bytes("")
+        });
+        UserOpSignature memory userOpSig = UserOpSignature({
+            sig: abi.encode(sigWrapper),
+            recordData: abi.encode(recordData),
+            confirmedValueHashStorageProof: new bytes[](0),
+            useAggregator: false
+        });
+        return abi.encode(userOpSig);
     }
 
     function isApprovedSelector(bytes4 selector) internal pure returns (bool) {

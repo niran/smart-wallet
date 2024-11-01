@@ -46,9 +46,19 @@ contract CoinbaseSmartWalletAggregator is IAggregator {
     /// @return sigForUserOp The value to put into the signature field of the userOp when calling handleOps.
     ///                      (Usually empty for BLS-style aggregators, but for this aggregator it's the same as the input)
     function validateUserOpSignature(UserOperation calldata userOp) public view returns (bytes memory sigForUserOp) {
-        require(LibCoinbaseSmartWalletRecord.isValidUserOp(userOp, address(keystore)), InvalidUserOp());
+        require(LibCoinbaseSmartWalletRecord.isValidUserOp(userOp, hashUserOp(userOp), address(keystore)), InvalidUserOp());
 
         return userOp.signature;
+    }
+
+    function hashUserOp(UserOperation calldata userOp)
+        internal
+        view
+        returns (bytes32)
+    {
+        CoinbaseSmartWallet wallet = CoinbaseSmartWallet(payable(userOp.sender));
+        bytes32 userOpHash = UserOperationLib.hash(userOp);
+        return keccak256(abi.encode(userOpHash, wallet.entryPoint(), block.chainid));
     }
 
     /// @notice No-op implementation of IAggregator.aggregateSignatures.

@@ -180,7 +180,7 @@ contract CoinbaseSmartWallet is ERC1271, IAccount, UUPSUpgradeable, Receiver {
         if (signature.useAggregator) {
             return uint160(address(aggregator));
         } else {
-            if (LibCoinbaseSmartWalletRecord.isValidUserOp(userOp, address(keystore))) {
+            if (LibCoinbaseSmartWalletRecord.isValidUserOp(userOp, userOpHash, address(keystore))) {
                 return 0;
             } else {
                 return 1;
@@ -295,7 +295,7 @@ contract CoinbaseSmartWallet is ERC1271, IAccount, UUPSUpgradeable, Receiver {
     /// @dev Used by `ERC1271.isValidSignature` signature validation. This is simpler than our 
     ///      IAccount.validateUserOp implementation because no aggregator can be involved and storage
     ///      access is unlimited.
-    /// @dev `signature` should be the resutlf of: `abi.encode(sig, recordValue, confirmedValueHashStorageProof)`.
+    /// @dev `signature` should be the resutlf of: `abi.encode(sig, recordData, confirmedValueHashStorageProof)`.
     //       The content of `sig` depends on the Keyspace key type:
     ///         - For Secp256k1 key type `sig` should be `abi.encodePacked(r, s, v)`
     ///         - For WebAuthn key type `sig` should be `abi.encode(WebAuthnAuth)`
@@ -303,17 +303,17 @@ contract CoinbaseSmartWallet is ERC1271, IAccount, UUPSUpgradeable, Receiver {
     /// @param signature ABI encoded `SignatureWrapper`.
     function _isValidSignature(bytes32 h, bytes calldata signature) internal view virtual override returns (bool) {
         // Decode the raw `signature`.
-        (bytes memory sig, bytes memory recordValue, bytes[] memory confirmedValueHashStorageProof) =
+        (bytes memory sig, bytes memory recordData, bytes[] memory confirmedValueHashStorageProof) =
             abi.decode(signature, (bytes, bytes, bytes[]));
 
         if (!keystore.isValueHashCurrent(
                 _getCoinbaseSmartWalletStorage().ksID,
-                keccak256(recordValue),
+                keccak256(recordData),
                 confirmedValueHashStorageProof)) {
             return false;
         }
 
-        return LibCoinbaseSmartWalletRecord.isValidSignature(h, sig, recordValue);
+        return LibCoinbaseSmartWalletRecord.isValidSignature(h, sig, recordData);
     }
 
     /// @inheritdoc UUPSUpgradeable

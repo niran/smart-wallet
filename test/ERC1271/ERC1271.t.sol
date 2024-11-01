@@ -169,7 +169,7 @@ contract ERC1271Test is Test {
         // 3. Expect calls to the KeyStore and StateVerifier contracts.
         // 4. If `isValidProof`and using ERC1271 signature expect calls to `ERC1271.isValidSignature`.
 
-        function (Vm.Wallet memory , bytes32, bool , bytes memory )  returns(bytes memory) sigBuilder;
+        function (Vm.Wallet memory , bytes32, bool )  returns(bytes memory) sigBuilder;
         sigBuilder = LibCoinbaseSmartWallet.webAuthnSignature;
 
         Vm.Wallet memory wallet;
@@ -188,7 +188,6 @@ contract ERC1271Test is Test {
         vm.expectCall({callee: keystore, data: abi.encodeWithSelector(BridgedKeystore(keystore).keystoreStorageRoot.selector)});
 
         if (isValidProof == true && sigBuilder == LibCoinbaseSmartWallet.eip1271Signature) {
-            console.log("OK1");
             vm.expectCall({callee: wallet.addr, data: abi.encodeWithSelector(ERC1271.isValidSignature.selector)});
         }
     }
@@ -198,7 +197,7 @@ contract ERC1271Test is Test {
         uint248 privateKey,
         bool isValidProof,
         bool isValidSig,
-        function (Vm.Wallet memory , bytes32, bool , bytes memory )  returns(bytes memory) sigBuilder,
+        function (Vm.Wallet memory , bytes32, bool )  returns(bytes memory) sigBuilder,
         bytes32 h
     ) private returns (Vm.Wallet memory wallet, uint256 stateRoot, bytes memory proof, bytes memory signature) {
         // Setup test:
@@ -209,15 +208,11 @@ contract ERC1271Test is Test {
         // 5. Create a valid or invalid `signature` of `replaySafeHash(h)` depending on `isValidSig`.
         //    NOTE: Invalid signatures are still correctly encoded.
 
-        proof = "STATE PROOF";
         stateRoot = 42;
 
         LibCoinbaseSmartWallet.mockKeystore({keystore: keystore, root: stateRoot});
         LibCoinbaseSmartWallet.mockIsValueHashCurrent({
             keystore: keystore,
-            ksID: ksID,
-            valueHash: 0,
-            proof: hex"",
             result: isValidProof
         });
 
@@ -225,6 +220,6 @@ contract ERC1271Test is Test {
 
         LibCoinbaseSmartWallet.initialize({target: address(sut), ksID: ksID});
 
-        signature = sigBuilder(wallet, sut.replaySafeHash(h), isValidSig, proof);
+        signature = sigBuilder(wallet, sut.replaySafeHash(h), isValidSig);
     }
 }
