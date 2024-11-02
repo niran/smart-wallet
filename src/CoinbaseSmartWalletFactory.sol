@@ -31,18 +31,20 @@ contract CoinbaseSmartWalletFactory {
     ///
     /// @dev Deployed as a ERC-1967 proxy that's implementation is `this.implementation`.
     ///
-    /// @param ksID      The The Keyspace ID.
+    /// @param controller The address of the controller that authorizes changes to the keystore record.
+    /// @param storageHash The hash of the configuration storage in the keystore record.
     /// @param nonce     The nonce of the account, a caller defined value which allows multiple accounts
     ///                  with the same `ksID` to exist at different addresses.
     ///
     /// @return account The address of the ERC-1967 proxy created with inputs `ksID`, `nonce`, and
     ///                 `this.implementation`.
-    function createAccount(bytes32 ksID, uint256 nonce)
+    function createAccount(address controller, bytes32 storageHash, uint256 nonce)
         external
         payable
         virtual
         returns (CoinbaseSmartWallet account)
     {
+        bytes32 ksID = _getKeystoreID(controller, storageHash);
         (bool alreadyDeployed, address accountAddress) =
             LibClone.createDeterministicERC1967(msg.value, implementation, _getSalt(ksID, nonce));
 
@@ -55,15 +57,16 @@ contract CoinbaseSmartWalletFactory {
 
     /// @notice Returns the deterministic address of the account that would be created by `createAccount`.
     ///
-    /// @param ksID     The The Keyspace ID.
-    /// @param nonce     The nonce provided to `createAccount()`.
+    /// @param storageHash The storage hash provided to `createAccount()`.
+    /// @param nonce       The nonce provided to `createAccount()`.
     ///
     /// @return The predicted account deployment address.
-    function getAddress(bytes32 ksID, uint256 nonce)
+    function getAddress(address controller, bytes32 storageHash, uint256 nonce)
         external
         view
         returns (address)
     {
+        bytes32 ksID = _getKeystoreID(controller, storageHash);
         return LibClone.predictDeterministicAddress(initCodeHash(), _getSalt(ksID, nonce), address(this));
     }
 
@@ -87,5 +90,13 @@ contract CoinbaseSmartWalletFactory {
         returns (bytes32)
     {
         return keccak256(abi.encode(ksID, nonce));
+    }
+
+    function _getKeystoreID(address controller, bytes32 storageHash)
+        internal
+        pure
+        returns (bytes32)
+    {
+        return keccak256(abi.encodePacked(controller, uint96(0), storageHash));
     }
 }

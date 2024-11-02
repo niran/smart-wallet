@@ -8,6 +8,7 @@ import {UUPSUpgradeable} from "solady/utils/UUPSUpgradeable.sol";
 import {BridgedKeystore} from "keyspace-v2/BridgedKeystore.sol";
 
 import {CoinbaseSmartWallet} from "../../src/CoinbaseSmartWallet.sol";
+import {CoinbaseSmartWalletRecordController} from "../../src/CoinbaseSmartWalletRecordController.sol";
 import {CoinbaseSmartWalletFactory} from "../../src/CoinbaseSmartWalletFactory.sol";
 import {LibCoinbaseSmartWalletRecord} from "../../src/LibCoinbaseSmartWalletRecord.sol";
 import {ERC1271} from "../../src/ERC1271.sol";
@@ -25,10 +26,12 @@ contract CoinbaseSmartWalletTest is Test {
         impl = new CoinbaseSmartWallet({keystore_: keystore, aggregator_: aggregator});
 
         CoinbaseSmartWalletFactory factory = new CoinbaseSmartWalletFactory(address(impl));
+        CoinbaseSmartWalletRecordController controller = new CoinbaseSmartWalletRecordController();
 
         // `ksID` is overwritten by tests so their value here does not matter.
         sut = factory.createAccount({
-            ksID: keccak256("start-key"),
+            controller: address(controller),
+            storageHash: keccak256("start-storage"),
             nonce: 0
         });
     }

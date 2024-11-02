@@ -6,12 +6,14 @@ import "forge-std/Test.sol";
 import {LibClone} from "solady/utils/LibClone.sol";
 
 import {CoinbaseSmartWallet} from "../../src/CoinbaseSmartWallet.sol";
+import {CoinbaseSmartWalletRecordController} from "../../src/CoinbaseSmartWalletRecordController.sol";
 import {CoinbaseSmartWalletFactory} from "../../src/CoinbaseSmartWalletFactory.sol";
 
 import {LibCoinbaseSmartWallet} from "../utils/LibCoinbaseSmartWallet.sol";
 
 contract CoinbaseSmartWalletFactoryTest is Test {
     CoinbaseSmartWallet private sw;
+    CoinbaseSmartWalletRecordController private rc;
     CoinbaseSmartWalletFactory private sut;
 
     function setUp() public {
@@ -23,9 +25,9 @@ contract CoinbaseSmartWalletFactoryTest is Test {
     //                                            MODIFIERS                                           //
     ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-    modifier withAccountDeployed(bytes32 ksID, uint256 nonce) {
+    modifier withAccountDeployed(bytes32 storageHash, uint256 nonce) {
         address account =
-            sut.getAddress({ksID: ksID, nonce: nonce});
+            sut.getAddress({controller: address(rc), storageHash: storageHash, nonce: nonce});
         vm.etch({target: account, newRuntimeBytecode: "Some bytecode"});
 
         _;
@@ -38,34 +40,35 @@ contract CoinbaseSmartWalletFactoryTest is Test {
     /// @custom:test-section createAccount
 
     function test_createAccount_deploysTheAccount_whenNotAlreadyDeployed(
-        bytes32 ksID,
+        bytes32 storageHash,
         uint256 nonce
     ) external {
         address account = address(
-            sut.createAccount({ksID: ksID, nonce: nonce})
+            sut.createAccount({controller: address(rc), storageHash: storageHash, nonce: nonce})
         );
         assertTrue(account != address(0));
         assertGt(account.code.length, 0);
     }
 
     function test_createAccount_initializesTheAccount_whenNotAlreadyDeployed(
-        bytes32 ksID,
+        bytes32 storageHash,
         uint256 nonce
     ) external {
-        address expectedAccount = _create2Address({ksID: ksID, nonce: nonce});
+        address expectedAccount = _create2Address({storageHash: storageHash, nonce: nonce});
+        bytes32 ksID = keccak256(abi.encodePacked(rc, uint96(0), storageHash));
         vm.expectCall({
             callee: expectedAccount,
             data: abi.encodeCall(CoinbaseSmartWallet.initialize, (ksID))
         });
-        sut.createAccount({ksID: ksID, nonce: nonce});
+        sut.createAccount({controller: address(rc), storageHash: storageHash, nonce: nonce});
     }
 
     function test_createAccount_returnsTheAccountAddress_whenAlreadyDeployed(
-        bytes32 ksID,
+        bytes32 storageHash,
         uint256 nonce
-    ) external withAccountDeployed(ksID, nonce) {
+    ) external withAccountDeployed(storageHash, nonce) {
         address account = address(
-            sut.createAccount({ksID: ksID, nonce: nonce})
+            sut.createAccount({controller: address(rc), storageHash: storageHash, nonce: nonce})
         );
         assertTrue(account != address(0));
         assertGt(account.code.length, 0);
@@ -73,11 +76,11 @@ contract CoinbaseSmartWalletFactoryTest is Test {
 
     /// @custom:test-section getAddress
 
-    function test_getAddress_returnsTheAccountCounterfactualAddress(bytes32 ksID, uint256 nonce)
+    function test_getAddress_returnsTheAccountCounterfactualAddress(bytes32 storageHash, uint256 nonce)
         external
     {
-        address expectedAccountAddress = _create2Address({ksID: ksID, nonce: nonce});
-        address accountAddress = sut.getAddress({ksID: ksID, nonce: nonce});
+        address expectedAccountAddress = _create2Address({storageHash: storageHash, nonce: nonce});
+        address accountAddress = sut.getAddress({controller: address(rc), storageHash: storageHash, nonce: nonce});
 
         assertEq(accountAddress, expectedAccountAddress);
     }
@@ -92,11 +95,12 @@ contract CoinbaseSmartWalletFactoryTest is Test {
     //                                         TESTS HELPERS                                          //
     ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-    function _create2Address(bytes32 ksID, uint256 nonce)
+    function _create2Address(bytes32 storageHash, uint256 nonce)
         private
         view
         returns (address)
     {
+        bytes32 ksID = keccak256(abi.encodePacked(rc, uint96(0), storageHash));
         return vm.computeCreate2Address({
             salt: _getSalt({ksID: ksID, nonce: nonce}),
             initCodeHash: LibClone.initCodeHashERC1967(address(sw)),
