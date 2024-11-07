@@ -2,6 +2,7 @@
 pragma solidity ^0.8.4;
 
 import {CoinbaseSmartWallet} from "./CoinbaseSmartWallet.sol";
+import {Config, ConfigLib} from "keyspace-v3/libs/ConfigLib.sol";
 
 import {LibClone} from "solady/utils/LibClone.sol";
 
@@ -31,43 +32,56 @@ contract CoinbaseSmartWalletFactory {
     ///
     /// @dev Deployed as a ERC-1967 proxy that's implementation is `this.implementation`.
     ///
-    /// @param controller The address of the controller that authorizes changes to the keystore record.
-    /// @param storageHash The hash of the configuration storage in the keystore record.
+    /// @param config    The initial config for the wallet.
     /// @param nonce     The nonce of the account, a caller defined value which allows multiple accounts
-    ///                  with the same `ksID` to exist at different addresses.
+    ///                  with the same `configHash` to exist at different addresses.
     ///
-    /// @return account The address of the ERC-1967 proxy created with inputs `ksID`, `nonce`, and
+    /// @return account The address of the ERC-1967 proxy created with inputs `configHash`, `nonce`, and
     ///                 `this.implementation`.
-    function createAccount(address controller, bytes32 storageHash, uint256 nonce)
+    function createAccount(bytes calldata config, uint256 nonce)
         external
         payable
         virtual
         returns (CoinbaseSmartWallet account)
     {
-        bytes32 ksID = _getKeystoreID(controller, storageHash);
+        bytes32 configHash = ConfigLib.hash(config);
         (bool alreadyDeployed, address accountAddress) =
-            LibClone.createDeterministicERC1967(msg.value, implementation, _getSalt(ksID, nonce));
+            LibClone.createDeterministicERC1967(msg.value, implementation, _getSalt(configHash, nonce));
 
         account = CoinbaseSmartWallet(payable(accountAddress));
 
         if (!alreadyDeployed) {
-            account.initialize(ksID);
+            account.initialize(configHash, config);
         }
     }
 
     /// @notice Returns the deterministic address of the account that would be created by `createAccount`.
     ///
-    /// @param storageHash The storage hash provided to `createAccount()`.
-    /// @param nonce       The nonce provided to `createAccount()`.
+    /// @param initialConfigHash The hash of the config provided to `createAccount()`.
+    /// @param nonce             The nonce provided to `createAccount()`.
     ///
     /// @return The predicted account deployment address.
-    function getAddress(address controller, bytes32 storageHash, uint256 nonce)
+    function getAddress(bytes32 initialConfigHash, uint256 nonce)
+        public
+        view
+        returns (address)
+    {
+        return LibClone.predictDeterministicAddress(initCodeHash(), _getSalt(initialConfigHash, nonce), address(this));
+    }
+
+    /// @notice Returns the deterministic address of the account that would be created by `createAccount`.
+    ///
+    /// @param initialConfig The initial config provided to `createAccount()`.
+    /// @param nonce         The nonce provided to `createAccount()`.
+    ///
+    /// @return The predicted account deployment address.
+    function getAddress(bytes initialConfig, uint256 nonce)
         external
         view
         returns (address)
     {
-        bytes32 ksID = _getKeystoreID(controller, storageHash);
-        return LibClone.predictDeterministicAddress(initCodeHash(), _getSalt(ksID, nonce), address(this));
+        bytes32 initialConfigHash = ConfigLib.hash(initialConfig);
+        return getAddress(initialConfigHash, nonce);
     }
 
     /// @notice Returns the initialization code hash of the account:
@@ -80,16 +94,16 @@ contract CoinbaseSmartWalletFactory {
 
     /// @notice Returns the create2 salt for `LibClone.predictDeterministicAddress`
     ///
-    /// @param ksID     The Keyspace ID.
-    /// @param nonce     The nonce provided to `createAccount()`.
+    /// @param configHash The hash of the initial config.
+    /// @param nonce      The nonce provided to `createAccount()`.
     ///
     /// @return The computed salt.
-    function _getSalt(bytes32 ksID,  uint256 nonce)
+    function _getSalt(bytes32 configHash,  uint256 nonce)
         internal
         pure
         returns (bytes32)
     {
-        return keccak256(abi.encode(ksID, nonce));
+        return keccak256(abi.encode(configHash, nonce));
     }
 
     function _getKeystoreID(address controller, bytes32 storageHash)

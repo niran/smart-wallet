@@ -6,10 +6,7 @@ import "forge-std/Test.sol";
 import {LibClone} from "solady/utils/LibClone.sol";
 
 import {CoinbaseSmartWallet} from "../../src/CoinbaseSmartWallet.sol";
-import {CoinbaseSmartWalletRecordController} from "../../src/CoinbaseSmartWalletRecordController.sol";
 import {CoinbaseSmartWalletFactory} from "../../src/CoinbaseSmartWalletFactory.sol";
-
-import {LibCoinbaseSmartWallet} from "../utils/LibCoinbaseSmartWallet.sol";
 
 contract CoinbaseSmartWalletFactoryTest is Test {
     CoinbaseSmartWallet private sw;

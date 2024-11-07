@@ -8,9 +8,7 @@ import {UUPSUpgradeable} from "solady/utils/UUPSUpgradeable.sol";
 import {BridgedKeystore} from "keyspace-v2/BridgedKeystore.sol";
 
 import {CoinbaseSmartWallet} from "../../src/CoinbaseSmartWallet.sol";
-import {CoinbaseSmartWalletRecordController} from "../../src/CoinbaseSmartWalletRecordController.sol";
 import {CoinbaseSmartWalletFactory} from "../../src/CoinbaseSmartWalletFactory.sol";
-import {LibCoinbaseSmartWalletRecord} from "../../src/LibCoinbaseSmartWalletRecord.sol";
 import {ERC1271} from "../../src/ERC1271.sol";
 
 import {LibCoinbaseSmartWallet, KeystoreOutput} from "../utils/LibCoinbaseSmartWallet.sol";

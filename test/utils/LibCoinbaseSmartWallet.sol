@@ -8,10 +8,8 @@ import {Vm} from "forge-std/Vm.sol";
 import {Base64} from "openzeppelin-contracts/contracts/utils/Base64.sol";
 import {UUPSUpgradeable} from "solady/utils/UUPSUpgradeable.sol";
 import {WebAuthn} from "webauthn-sol/WebAuthn.sol";
-import {BridgedKeystore} from "keyspace-v2/BridgedKeystore.sol";
 
 import {CoinbaseSmartWallet} from "../../src/CoinbaseSmartWallet.sol";
-import {SignatureWrapper, CoinbaseSmartWalletRecordData, UserOpSignature} from "../../src/LibCoinbaseSmartWalletRecord.sol";
 import {ERC1271} from "../../src/ERC1271.sol";
 
 import {console} from "forge-std/Test.sol";
@@ -58,7 +56,7 @@ library LibCoinbaseSmartWallet {
     function mockKeystore(address keystore, uint256 root) internal {
         vm.mockCall({
             callee: keystore,
-            data: abi.encodeWithSelector(BridgedKeystore(keystore).keystoreStorageRoot.selector),
+            data: hex"00",
             returnData: abi.encode(root)
         });
     }
@@ -66,7 +64,7 @@ library LibCoinbaseSmartWallet {
     function mockRevertKeystore(address keystore, bytes memory revertData) internal {
         vm.mockCallRevert({
             callee: keystore,
-            data: abi.encodeWithSelector(BridgedKeystore(keystore).keystoreStorageRoot.selector),
+            data: hex"00",
             revertData: revertData
         });
     }
@@ -74,7 +72,7 @@ library LibCoinbaseSmartWallet {
     function mockIsValueHashCurrent(address keystore, bool result) internal {
         vm.mockCall({
             callee: keystore,
-            data: abi.encodeWithSelector(BridgedKeystore(keystore).isValueHashCurrent.selector),
+            data: hex"00,
             returnData: abi.encode(result)
         });
     }
@@ -84,7 +82,7 @@ library LibCoinbaseSmartWallet {
     {
         vm.mockCallRevert({
             callee: keystore,
-            data: abi.encodeWithSelector(BridgedKeystore(keystore).isValueHashCurrent.selector),
+            data: hex"00,
             revertData: revertData
         });
     }
@@ -92,12 +90,6 @@ library LibCoinbaseSmartWallet {
     ////////////////////////////////////////////////////////////////////////////////////////////////////
     //                                         TEST HELPERS                                           //
     ////////////////////////////////////////////////////////////////////////////////////////////////////
-
-    function uintToKsKeyType(uint256 value) internal pure returns (CoinbaseSmartWallet.KeyspaceKeyType) {
-        // Prevent generting 0 (None) value.
-        value = value % 2;
-        return CoinbaseSmartWallet.KeyspaceKeyType(value + 1);
-    }
 
     function hashUserOp(CoinbaseSmartWallet sut, UserOperation memory userOp, bool forceChainId)
         internal
@@ -237,7 +229,7 @@ library LibCoinbaseSmartWallet {
         pure
         returns (bytes memory)
     {
-        SignatureWrapper memory sigWrapper = SignatureWrapper({
+        CoinbaseSmartWallet.SignatureWrapper memory sigWrapper = CoinbaseSmartWallet.SignatureWrapper({
             ownerIndex: 0,
             signatureData: sig
         });

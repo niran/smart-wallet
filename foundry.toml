@@ -9,6 +9,7 @@ fs_permissions = [
 
 remappings = [
     "keyspace-v2/=lib/keyspace-v2/contracts/src/",
+    "keyspace-v3/=lib/keyspace-v3/contracts/src/",
 ]
 
 [profile.deploy]
