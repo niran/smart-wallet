@@ -10,15 +10,14 @@ import {UUPSUpgradeable} from "solady/utils/UUPSUpgradeable.sol";
 import {WebAuthn} from "webauthn-sol/WebAuthn.sol";
 
 import {Keystore, MasterKeystoreStorage, ReplicaKeystoreStorage} from "keyspace-v3/Keystore.sol";
-import {OPStackKeystore} from "keyspace-v3/examples/OPStackKeystore.sol";
-import {BlockHeader} from "keyspace-v3/libs/BlockLib.sol";
-import {Config, ConfigLib} from "keyspace-v3/libs/ConfigLib.sol";
+import {OPStackKeystore} from "keyspace-v3/chains/OPStackKeystore.sol";
+import {BlockLib} from "keyspace-v3/libs/BlockLib.sol";
+import {ConfigLib} from "keyspace-v3/libs/ConfigLib.sol";
 
 import {ERC1271} from "./ERC1271.sol";
 
 struct CoinbaseSmartWalletConfig {
     bytes[] owners;
-    address implementation;
 }
 
 struct CoinbaseSmartWalletConfigView {
@@ -88,9 +87,6 @@ contract CoinbaseSmartWallet is OPStackKeystore, ERC1271, IAccount, UUPSUpgradea
     ///      Follows ERC-7201 (see https://eips.ethereum.org/EIPS/eip-7201).
     bytes32 private constant COINBASE_SMART_WALLET_LOCATION =
         0x99a34bffa68409ea583717aeb46691b092950ed596c79c2fc789604435b66c00;
-
-    /// @notice The wallet eventual consistency window.
-    uint256 constant EVENTUAL_CONSISTENCY_WINDOW = 7 days;
     
     /// @notice Thrown when `initialize` is called but the account has already been initialized.
     error Initialized();
@@ -176,39 +172,17 @@ contract CoinbaseSmartWallet is OPStackKeystore, ERC1271, IAccount, UUPSUpgradea
         }
     }
 
-    /// @notice Ensures the Keystore config is eventually consistent with the master chain.
-    modifier withEventualConsistency() {
-        // On replica chains ensure eventual consistency.
-        if (msg.sender != entryPoint() && msg.sender != address(this) && block.chainid != masterChainId) {
-            uint256 confirmedConfigTimestamp = _confirmedConfigTimestamp();
-            uint256 validUntil = confirmedConfigTimestamp + EVENTUAL_CONSISTENCY_WINDOW;
-
-            require(block.timestamp <= validUntil, UnauthorizedCaller());
-        }
-
-        _;
-    }
-
     constructor(uint256 masterChainId) OPStackKeystore(masterChainId) {}
 
     /// @notice Initializes the contract with the given `config`.
     ///
-    /// @dev Only callable once on the master chain.
-    /// @dev The timestamps for the confirmed config hash remain zero on either chain.
-    ///
     /// @param config The initial configuration of the account.
-    function initialize(bytes32 configHash, bytes calldata config) external {
-        if (block.chainid == masterChainId) {
-            require(_sMaster().configHash == 0 && _sMaster().configNonce == 0, Initialized());
-            _sMaster().configHash = configHash;
-        } else {
-            require(_sReplica().confirmedConfigHash == 0 && _sReplica().confirmedConfigNonce == 0, Initialized());
-            _sReplica().confirmedConfigHash = configHash;
-            // FIXME: Add this back after making the function internal rather than private.
-            //_ensurePreconfirmedConfigsAreValid(configHash, config);
-        }
+    function initialize(ConfigLib.Config calldata config) external {
+        super._initialize(config);
+    }
 
-        _newConfigHook(configHash, config);
+    function _eventualConsistencyWindow() internal pure override returns (uint256) {
+        return 7 days;
     }
 
     /// @inheritdoc IAccount
@@ -375,9 +349,14 @@ contract CoinbaseSmartWallet is OPStackKeystore, ERC1271, IAccount, UUPSUpgradea
     function _isValidSignature(bytes32 hash, bytes calldata signature) internal view virtual override returns (bool) {
         SignatureWrapper memory sigWrapper = abi.decode(signature, (SignatureWrapper));
         bytes memory ownerBytes = ownerAtIndex(sigWrapper.ownerIndex);
-        return _isValidSignatureForOwner(ownerBytes, hash, sigWrapper.signatureData);
+        return _isValidSignatureForOwner(hash, ownerBytes, sigWrapper.signatureData);
     }
 
+    /// @notice Validates the signature for the given `ownerBytes` and `hash`.
+    ///
+    /// @param hash          The hash to validate.
+    /// @param ownerBytes    The owner's public key to validate the signature against.
+    /// @param signatureData The unwrapped signature to validate.
     function _isValidSignatureForOwner(bytes32 hash, bytes memory ownerBytes, bytes memory signatureData) internal view virtual returns (bool) {
         if (ownerBytes.length == 32) {
             if (uint256(bytes32(ownerBytes)) > type(uint160).max) {
@@ -406,20 +385,20 @@ contract CoinbaseSmartWallet is OPStackKeystore, ERC1271, IAccount, UUPSUpgradea
     }
 
     /// @inheritdoc Keystore
-    function _authorizeUpdate(Config calldata newConfig, BlockHeader memory, bytes calldata authorizationProof)
+    function _authorizeConfigUpdate(ConfigLib.Config calldata newConfig, BlockLib.BlockHeader memory, bytes calldata authorizationProof)
         internal
         view
         virtual
         override
-        // TODO: If we enforce every preconfirmation to also perform a confirmation we can safely remove this.
-        withEventualConsistency
     {
         bytes32 newConfigHash = ConfigLib.hash(newConfig);
-        (bytes memory sigAuth, bytes memory sigUpdate,) =
+        (bytes memory sigAuth, bytes memory sigUpdate) =
             abi.decode(authorizationProof, (bytes, bytes));
 
         // Ensure the update is authorized.
-        require(_isValidSignature({hash: newConfigHash, signature: sigAuth}), UnauthorizedKeystoreConfigUpdate());
+        SignatureWrapper memory sigWrapper = abi.decode(sigAuth, (SignatureWrapper));
+        bytes memory ownerBytes = ownerAtIndex(sigWrapper.ownerIndex);
+        require(_isValidSignatureForOwner(newConfigHash, ownerBytes, sigWrapper.signatureData), UnauthorizedKeystoreConfigUpdate());
 
         // Verify that `sigUpdate` is a valid signature of newConfigHash with the new owners to ensure
         // the new owners are valid.
@@ -429,8 +408,8 @@ contract CoinbaseSmartWallet is OPStackKeystore, ERC1271, IAccount, UUPSUpgradea
             // same signature using the new config.
             sigUpdate = sigAuth;
         }
-        SignatureWrapper memory sigWrapper = abi.decode(sigUpdate, (SignatureWrapper));
-        bytes memory ownerBytes = newData.owners[sigWrapper.ownerIndex];
+        sigWrapper = abi.decode(sigUpdate, (SignatureWrapper));
+        ownerBytes = newData.owners[sigWrapper.ownerIndex];
 
         require(
             _isValidSignatureForOwner(newConfigHash, ownerBytes, sigWrapper.signatureData),
@@ -448,7 +427,7 @@ contract CoinbaseSmartWallet is OPStackKeystore, ERC1271, IAccount, UUPSUpgradea
     ///
     /// @return `true` if the account is an owner else `false`.
     function isOwnerAddress(address account) public view virtual returns (bool) {
-        return _currentVersionedConfig().config.view_.isOwner[abi.encode(account)];
+        return _currentVersionedConfig().view_.isOwner[abi.encode(account)];
     }
 
     /// @notice Checks if the given `x`, `y` public key is registered as owner.
@@ -458,7 +437,7 @@ contract CoinbaseSmartWallet is OPStackKeystore, ERC1271, IAccount, UUPSUpgradea
     ///
     /// @return `true` if the account is an owner else `false`.
     function isOwnerPublicKey(bytes32 x, bytes32 y) public view virtual returns (bool) {
-        return _currentVersionedConfig().config.view_.isOwner[_currentConfigHash()][abi.encode(x, y)];
+        return _currentVersionedConfig().view_.isOwner[abi.encode(x, y)];
     }
 
     /// @notice Checks if the given `account` bytes is registered as owner.
@@ -467,7 +446,7 @@ contract CoinbaseSmartWallet is OPStackKeystore, ERC1271, IAccount, UUPSUpgradea
     ///
     /// @return `true` if the account is an owner else `false`.
     function isOwnerBytes(bytes memory account) public view virtual returns (bool) {
-        return _currentVersionedConfig().config.view_.isOwner[account];
+        return _currentVersionedConfig().view_.isOwner[account];
     }
 
     function _currentVersionedConfig() internal view virtual returns (CoinbaseSmartWalletConfigVersion storage) {
@@ -511,30 +490,6 @@ contract CoinbaseSmartWallet is OPStackKeystore, ERC1271, IAccount, UUPSUpgradea
     function _getCoinbaseSmartWalletStorage() internal pure returns (CoinbaseSmartWalletStorage storage $) {
         assembly ("memory-safe") {
             $.slot := COINBASE_SMART_WALLET_LOCATION
-        }
-    }
-
-    ////////////////////////////////////////////////////////////////////////////////////////////////////
-    //                                        PRIVATE FUNCTIONS                                       //
-    ////////////////////////////////////////////////////////////////////////////////////////////////////
-
-    /// @notice Helper function to get a storage reference to the `MasterKeystoreStorage` struct.
-    ///
-    /// @return $ A storage reference to the `MasterKeystoreStorage` struct.
-    function _sMaster() private pure returns (MasterKeystoreStorage storage $) {
-        bytes32 position = MASTER_KEYSTORE_STORAGE_LOCATION;
-        assembly ("memory-safe") {
-            $.slot := position
-        }
-    }
-
-    /// @notice Helper function to get a storage reference to the `ReplicaKeystoreStorage` struct.
-    ///
-    /// @return $ A storage reference to the `ReplicaKeystoreStorage` struct.
-    function _sReplica() private pure returns (ReplicaKeystoreStorage storage $) {
-        bytes32 position = REPLICA_KEYSTORE_STORAGE_LOCATION;
-        assembly ("memory-safe") {
-            $.slot := position
         }
     }
 }

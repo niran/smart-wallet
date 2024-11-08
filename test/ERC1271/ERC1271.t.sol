@@ -3,20 +3,20 @@ pragma solidity ^0.8.23;
 
 import "forge-std/Test.sol";
 
-import {BridgedKeystore} from "keyspace-v2/BridgedKeystore.sol";
-
 import {CoinbaseSmartWallet} from "../../src/CoinbaseSmartWallet.sol";
+import {CoinbaseSmartWalletFactory} from "../../src/CoinbaseSmartWalletFactory.sol";
 import {ERC1271} from "../../src/ERC1271.sol";
 
 import {LibCoinbaseSmartWallet} from "../utils/LibCoinbaseSmartWallet.sol";
 
 contract ERC1271Test is Test {
-    address private keystore = makeAddr("KeyStore");
-    address private aggregator = makeAddr("Aggregator");
+    CoinbaseSmartWallet private impl;
     CoinbaseSmartWallet private sut;
+    CoinbaseSmartWalletFactory private factory;
 
     function setUp() public {
-        sut = new CoinbaseSmartWallet({keystore_: keystore, aggregator_: aggregator});
+        impl = new CoinbaseSmartWallet({masterChainId: block.chainid});
+        factory = new CoinbaseSmartWalletFactory(address(impl));
     }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -176,16 +176,12 @@ contract ERC1271Test is Test {
         uint256 stateRoot;
         bytes memory proof;
 
-        (wallet, stateRoot, proof, signature) = _setUpTest_isValidSignature({
+        (wallet, signature) = _setUpTest_isValidSignature({
             privateKey: privateKey,
-            ksID: ksID,
             h: h,
-            isValidProof: isValidProof,
             isValidSig: isValidSig,
             sigBuilder: sigBuilder
         });
-
-        vm.expectCall({callee: keystore, data: abi.encodeWithSelector(BridgedKeystore(keystore).keystoreStorageRoot.selector)});
 
         if (isValidProof == true && sigBuilder == LibCoinbaseSmartWallet.eip1271Signature) {
             vm.expectCall({callee: wallet.addr, data: abi.encodeWithSelector(ERC1271.isValidSignature.selector)});
@@ -193,13 +189,11 @@ contract ERC1271Test is Test {
     }
 
     function _setUpTest_isValidSignature(
-        bytes32 ksID,
         uint248 privateKey,
-        bool isValidProof,
         bool isValidSig,
         function (Vm.Wallet memory , bytes32, bool )  returns(bytes memory) sigBuilder,
         bytes32 h
-    ) private returns (Vm.Wallet memory wallet, uint256 stateRoot, bytes memory proof, bytes memory signature) {
+    ) private returns (Vm.Wallet memory wallet, bytes memory signature) {
         // Setup test:
         // 1. Mock `BridgedKeystore.keystoreStorageRoot` to return 42.
         // 2. Mock `IVerifier.Verify` to return `isValidProof`.
@@ -208,17 +202,8 @@ contract ERC1271Test is Test {
         // 5. Create a valid or invalid `signature` of `replaySafeHash(h)` depending on `isValidSig`.
         //    NOTE: Invalid signatures are still correctly encoded.
 
-        stateRoot = 42;
-
-        LibCoinbaseSmartWallet.mockKeystore({keystore: keystore, root: stateRoot});
-        LibCoinbaseSmartWallet.mockIsValueHashCurrent({
-            keystore: keystore,
-            result: isValidProof
-        });
-
+        sut = LibCoinbaseSmartWallet.passkeyWalletAccount(factory, privateKey);
         wallet = LibCoinbaseSmartWallet.passKeyWallet(privateKey);
-
-        LibCoinbaseSmartWallet.initialize({target: address(sut), ksID: ksID});
 
         signature = sigBuilder(wallet, sut.replaySafeHash(h), isValidSig);
     }

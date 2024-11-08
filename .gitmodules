@@ -19,9 +19,6 @@
 [submodule "lib/safe-singleton-deployer-sol"]
 	path = lib/safe-singleton-deployer-sol
 	url = https://github.com/wilsoncusack/safe-singleton-deployer-sol
-[submodule "lib/keyspace-v2"]
-	path = lib/keyspace-v2
-	url = https://github.com/xenoliss/keyspace-v2
 [submodule "lib/keyspace-v3"]
 	path = lib/keyspace-v3
 	url = https://github.com/xenoliss/keyspace-v3

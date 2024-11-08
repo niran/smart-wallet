@@ -2,7 +2,7 @@
 pragma solidity ^0.8.4;
 
 import {CoinbaseSmartWallet} from "./CoinbaseSmartWallet.sol";
-import {Config, ConfigLib} from "keyspace-v3/libs/ConfigLib.sol";
+import {ConfigLib} from "keyspace-v3/libs/ConfigLib.sol";
 
 import {LibClone} from "solady/utils/LibClone.sol";
 
@@ -32,26 +32,27 @@ contract CoinbaseSmartWalletFactory {
     ///
     /// @dev Deployed as a ERC-1967 proxy that's implementation is `this.implementation`.
     ///
-    /// @param config    The initial config for the wallet.
-    /// @param nonce     The nonce of the account, a caller defined value which allows multiple accounts
-    ///                  with the same `configHash` to exist at different addresses.
+    /// @param configData The initial config data for the wallet.
+    /// @param nonce      The nonce of the account, a caller defined value which allows multiple accounts
+    ///                   with the same `configHash` to exist at different addresses.
     ///
     /// @return account The address of the ERC-1967 proxy created with inputs `configHash`, `nonce`, and
     ///                 `this.implementation`.
-    function createAccount(bytes calldata config, uint256 nonce)
+    function createAccount(bytes calldata configData, uint256 nonce)
         external
         payable
         virtual
         returns (CoinbaseSmartWallet account)
     {
-        bytes32 configHash = ConfigLib.hash(config);
+        ConfigLib.Config memory config = ConfigLib.Config({nonce: uint96(0), data: configData});
+        bytes32 configHash = _hashConfig(config);
         (bool alreadyDeployed, address accountAddress) =
             LibClone.createDeterministicERC1967(msg.value, implementation, _getSalt(configHash, nonce));
 
         account = CoinbaseSmartWallet(payable(accountAddress));
 
         if (!alreadyDeployed) {
-            account.initialize(configHash, config);
+            account.initialize(config);
         }
     }
 
@@ -71,16 +72,16 @@ contract CoinbaseSmartWalletFactory {
 
     /// @notice Returns the deterministic address of the account that would be created by `createAccount`.
     ///
-    /// @param initialConfig The initial config provided to `createAccount()`.
-    /// @param nonce         The nonce provided to `createAccount()`.
+    /// @param initialConfigData The initial config data provided to `createAccount()`.
+    /// @param nonce             The nonce provided to `createAccount()`.
     ///
     /// @return The predicted account deployment address.
-    function getAddress(bytes initialConfig, uint256 nonce)
+    function getAddress(bytes calldata initialConfigData, uint256 nonce)
         external
         view
         returns (address)
     {
-        bytes32 initialConfigHash = ConfigLib.hash(initialConfig);
+        bytes32 initialConfigHash = _hashConfig(ConfigLib.Config({nonce: uint96(0), data: initialConfigData}));
         return getAddress(initialConfigHash, nonce);
     }
 
@@ -112,5 +113,9 @@ contract CoinbaseSmartWalletFactory {
         returns (bytes32)
     {
         return keccak256(abi.encodePacked(controller, uint96(0), storageHash));
+    }
+
+    function _hashConfig(ConfigLib.Config memory config) internal pure returns (bytes32) {
+        return keccak256(abi.encodePacked(config.nonce, config.data));
     }
 }

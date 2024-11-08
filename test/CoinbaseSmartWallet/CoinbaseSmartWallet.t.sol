@@ -5,7 +5,7 @@ import "forge-std/Test.sol";
 
 import {UserOperation} from "account-abstraction/interfaces/UserOperation.sol";
 import {UUPSUpgradeable} from "solady/utils/UUPSUpgradeable.sol";
-import {BridgedKeystore} from "keyspace-v2/BridgedKeystore.sol";
+import {ConfigLib} from "keyspace-v3/libs/ConfigLib.sol";
 
 import {CoinbaseSmartWallet} from "../../src/CoinbaseSmartWallet.sol";
 import {CoinbaseSmartWalletFactory} from "../../src/CoinbaseSmartWalletFactory.sol";
@@ -14,24 +14,13 @@ import {ERC1271} from "../../src/ERC1271.sol";
 import {LibCoinbaseSmartWallet, KeystoreOutput} from "../utils/LibCoinbaseSmartWallet.sol";
 
 contract CoinbaseSmartWalletTest is Test {
-    address private keystore = makeAddr("Keystore");
-    address private aggregator = makeAddr("Aggregator");
-
     CoinbaseSmartWallet private impl;
     CoinbaseSmartWallet private sut;
+    CoinbaseSmartWalletFactory private factory;
 
     function setUp() public {
-        impl = new CoinbaseSmartWallet({keystore_: keystore, aggregator_: aggregator});
-
-        CoinbaseSmartWalletFactory factory = new CoinbaseSmartWalletFactory(address(impl));
-        CoinbaseSmartWalletRecordController controller = new CoinbaseSmartWalletRecordController();
-
-        // `ksID` is overwritten by tests so their value here does not matter.
-        sut = factory.createAccount({
-            controller: address(controller),
-            storageHash: keccak256("start-storage"),
-            nonce: 0
-        });
+        impl = new CoinbaseSmartWallet({masterChainId: block.chainid});
+        factory = new CoinbaseSmartWalletFactory(address(impl));
     }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -50,24 +39,20 @@ contract CoinbaseSmartWalletTest is Test {
 
     /// @custom:test-section initialize
 
-    function test_initialize_reverts_whenTheAccountIsAlreadyInitialized(bytes32 ksID) external {
+    function test_initialize_reverts_whenTheAccountIsAlreadyInitialized(bytes memory owner) external {
+        (ConfigLib.Config memory config, bytes memory configData, bytes32 configHash) = LibCoinbaseSmartWallet.ownerConfig(owner);
+        sut = factory.createAccount({
+            configData: configData,
+            nonce: 0
+        });
         vm.expectRevert(CoinbaseSmartWallet.Initialized.selector);
-        sut.initialize({ksID: ksID});
-    }
-
-    function test_initialize_initializesTheAccount(bytes32 ksID) external {
-        // Setup test:
-        // 1. "De-initialize" the implementation.
-        {
-            LibCoinbaseSmartWallet.uninitialize(address(sut));
-        }
-
-        sut.initialize({ksID: ksID});
+        sut.initialize(config);
     }
 
     /// @custom:test-section validateUserOp
 
     function test_validateUserOp_reverts_whenNotCalledByTheEntryPoint(UserOperation memory userOp) external {
+        sut = LibCoinbaseSmartWallet.defaultWalletAccount(factory);
         bytes32 userOpHash = LibCoinbaseSmartWallet.hashUserOp({sut: sut, userOp: userOp, forceChainId: true});
 
         vm.expectRevert(CoinbaseSmartWallet.Unauthorized.selector);
@@ -80,6 +65,7 @@ contract CoinbaseSmartWalletTest is Test {
         // Setup test:
         // 1. Set `userOp.callData` to `CoinbaseSmartWallet.executeWithoutChainIdValidation.selector`.
         // 2. Set `userOp.nonce` NOT to `REPLAYABLE_NONCE_KEY`.
+        sut = LibCoinbaseSmartWallet.defaultWalletAccount(factory);
         uint256 key;
         {
             userOp.callData = abi.encodeWithSelector(CoinbaseSmartWallet.executeWithoutChainIdValidation.selector);
@@ -93,7 +79,7 @@ contract CoinbaseSmartWalletTest is Test {
 
         bytes32 userOpHash = LibCoinbaseSmartWallet.hashUserOp({sut: sut, userOp: userOp, forceChainId: true});
 
-        vm.expectRevert(abi.encodeWithSelector(LibCoinbaseSmartWalletRecord.InvalidNonceKey.selector, key));
+        vm.expectRevert(abi.encodeWithSelector(CoinbaseSmartWallet.InvalidNonceKey.selector, key));
         sut.validateUserOp({userOp: userOp, userOpHash: userOpHash, missingAccountFunds: 0});
     }
 
@@ -103,6 +89,7 @@ contract CoinbaseSmartWalletTest is Test {
         // Setup test:
         // 1. Set `userOp.callData` to `CoinbaseSmartWallet.execute.selector`.
         // 2. Set `userOp.nonce` to `REPLAYABLE_NONCE_KEY`.
+        sut = LibCoinbaseSmartWallet.defaultWalletAccount(factory);
         uint256 key;
         {
             userOp.callData = abi.encodeWithSelector(CoinbaseSmartWallet.execute.selector);
@@ -113,53 +100,18 @@ contract CoinbaseSmartWalletTest is Test {
 
         bytes32 userOpHash = LibCoinbaseSmartWallet.hashUserOp({sut: sut, userOp: userOp, forceChainId: true});
 
-        vm.expectRevert(abi.encodeWithSelector(LibCoinbaseSmartWalletRecord.InvalidNonceKey.selector, key));
+        vm.expectRevert(abi.encodeWithSelector(CoinbaseSmartWallet.InvalidNonceKey.selector, key));
         sut.validateUserOp({userOp: userOp, userOpHash: userOpHash, missingAccountFunds: 0});
     }
 
-    function test_validateUserOp_returnsOne_whenIsValueHashCurrentReverts(
+    function test_validateUserOp_returnsOne_whenSignatureIsInvalid(
         bytes32 ksID,
         uint248 privateKey,
         UserOperation memory userOp
     ) external withSenderEntryPoint {
+        
         bytes32 userOpHash = _setUpTestWrapper_validateUserOp({
-            ksID: ksID,
             privateKey: privateKey,
-            keystoreOutput: KeystoreOutput.Reverts,
-            isValidSig: true,
-            userOp: userOp
-        });
-
-        uint256 validationData = sut.validateUserOp({userOp: userOp, userOpHash: userOpHash, missingAccountFunds: 0});
-        assertEq(validationData, 1);
-    }
-
-    function test_validateUserOp_returnsOne_whenIsValueHashCurrentFails(
-        bytes32 ksID,
-        uint248 privateKey,
-        UserOperation memory userOp
-    ) external withSenderEntryPoint {
-        bytes32 userOpHash = _setUpTestWrapper_validateUserOp({
-            ksID: ksID,
-            privateKey: privateKey,
-            keystoreOutput: KeystoreOutput.Fails,
-            isValidSig: true,
-            userOp: userOp
-        });
-
-        uint256 validationData = sut.validateUserOp({userOp: userOp, userOpHash: userOpHash, missingAccountFunds: 0});
-        assertEq(validationData, 1);
-    }
-
-    function test_validateUserOp_returnsOne_whenStateProofIsValidButSignatureIsInvalid(
-        bytes32 ksID,
-        uint248 privateKey,
-        UserOperation memory userOp
-    ) external withSenderEntryPoint {
-        bytes32 userOpHash = _setUpTestWrapper_validateUserOp({
-            ksID: ksID,
-            privateKey: privateKey,
-            keystoreOutput: KeystoreOutput.Succeeds,
             isValidSig: false,
             userOp: userOp
         });
@@ -174,9 +126,7 @@ contract CoinbaseSmartWalletTest is Test {
         UserOperation memory userOp
     ) external withSenderEntryPoint {
         bytes32 userOpHash = _setUpTestWrapper_validateUserOp({
-            ksID: ksID,
             privateKey: privateKey,
-            keystoreOutput: KeystoreOutput.Succeeds,
             isValidSig: true,
             userOp: userOp
         });
@@ -192,9 +142,7 @@ contract CoinbaseSmartWalletTest is Test {
         uint256 missingAccountFunds
     ) external withSenderEntryPoint {
         bytes32 userOpHash = _setUpTestWrapper_validateUserOp({
-            ksID: ksID,
             privateKey: privateKey,
-            keystoreOutput: KeystoreOutput.Succeeds,
             isValidSig: true,
             userOp: userOp
         });
@@ -485,9 +433,7 @@ contract CoinbaseSmartWalletTest is Test {
     }
 
     function _setUpTestWrapper_validateUserOp(
-        bytes32 ksID,
         uint248 privateKey,
-        KeystoreOutput keystoreOutput,
         bool isValidSig,
         UserOperation memory userOp
     ) private returns (bytes32 userOpHash) {
@@ -501,13 +447,8 @@ contract CoinbaseSmartWalletTest is Test {
         sigBuilder = LibCoinbaseSmartWallet.webAuthnSignature;
 
         Vm.Wallet memory wallet;
-        uint256 stateRoot;
-        bytes memory proof;
-
-        (wallet, userOpHash, stateRoot, proof) = _setUpTest_validateUserOp({
-            ksID: ksID,
+        (wallet, userOpHash) = _setUpTest_validateUserOp({
             privateKey: privateKey,
-            keystoreOutput: keystoreOutput,
             isValidSig: isValidSig,
             sigBuilder: sigBuilder,
             userOp: userOp
@@ -519,13 +460,11 @@ contract CoinbaseSmartWalletTest is Test {
     }
 
     function _setUpTest_validateUserOp(
-        bytes32 ksID,
         uint248 privateKey,
-        KeystoreOutput keystoreOutput,
         bool isValidSig,
         function (Vm.Wallet memory , bytes32, bool )  returns(bytes memory) sigBuilder,
         UserOperation memory userOp
-    ) private returns (Vm.Wallet memory wallet, bytes32 userOpHash, uint256 stateRoot, bytes memory proof) {
+    ) private returns (Vm.Wallet memory wallet, bytes32 userOpHash) {
         // Setup test:
         // 1. Mock `BridgedKeystore.keystoreStorageRoot` to return 42.
         // 2. Mock `BridgedKeystore.isValueHashCurrent` to return revert, fail or succeed depending on `keystoreOutput`.
@@ -534,23 +473,8 @@ contract CoinbaseSmartWalletTest is Test {
         // 5. Set `userOp.nonce` to a valid nonce (with valid key).
         // 6. Set `userOp.signature` to a valid or invalid `signature` of `userOpHash` depending on `isValidSig`.
         //    NOTE: Invalid signatures are still correctly encoded.
-
-        stateRoot = 42;
-
-        LibCoinbaseSmartWallet.mockKeystore({keystore: keystore, root: stateRoot});
-        if (keystoreOutput == KeystoreOutput.Reverts) {
-            LibCoinbaseSmartWallet.mockRevertIsValueHashCurrent({
-                keystore: keystore,
-                revertData: "ISVALUEHASH REVERTS"
-            });
-        } else {
-            bool isValueHashCurrent = keystoreOutput == KeystoreOutput.Succeeds;
-            LibCoinbaseSmartWallet.mockIsValueHashCurrent({keystore: keystore, result: isValueHashCurrent});
-        }
-
+        sut = LibCoinbaseSmartWallet.passkeyWalletAccount(factory, privateKey);
         wallet = LibCoinbaseSmartWallet.passKeyWallet(privateKey);
-
-        LibCoinbaseSmartWallet.initialize({target: address(sut), ksID: ksID});
 
         userOp.sender = address(sut);
         userOp.nonce = LibCoinbaseSmartWallet.validNonceKey({sut: sut, userOp: userOp});
