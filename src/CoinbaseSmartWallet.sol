@@ -87,9 +87,6 @@ contract CoinbaseSmartWallet is OPStackKeystore, ERC1271, IAccount, UUPSUpgradea
     ///      Follows ERC-7201 (see https://eips.ethereum.org/EIPS/eip-7201).
     bytes32 private constant COINBASE_SMART_WALLET_LOCATION =
         0x99a34bffa68409ea583717aeb46691b092950ed596c79c2fc789604435b66c00;
-    
-    /// @notice Thrown when `initialize` is called but the account has already been initialized.
-    error Initialized();
 
     /// @notice Thrown when the `msg.sender` is not authorized to call a privileged function.
     error Unauthorized();

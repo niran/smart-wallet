@@ -6,6 +6,7 @@ import "forge-std/Test.sol";
 import {UserOperation} from "account-abstraction/interfaces/UserOperation.sol";
 import {UUPSUpgradeable} from "solady/utils/UUPSUpgradeable.sol";
 import {ConfigLib} from "keyspace-v3/libs/ConfigLib.sol";
+import {Keystore} from "keyspace-v3/Keystore.sol";
 
 import {CoinbaseSmartWallet} from "../../src/CoinbaseSmartWallet.sol";
 import {CoinbaseSmartWalletFactory} from "../../src/CoinbaseSmartWalletFactory.sol";
@@ -21,6 +22,7 @@ contract CoinbaseSmartWalletTest is Test {
     function setUp() public {
         impl = new CoinbaseSmartWallet({masterChainId: block.chainid});
         factory = new CoinbaseSmartWalletFactory(address(impl));
+        sut = LibCoinbaseSmartWallet.defaultWalletAccount(factory);
     }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -45,14 +47,13 @@ contract CoinbaseSmartWalletTest is Test {
             configData: configData,
             nonce: 0
         });
-        vm.expectRevert(CoinbaseSmartWallet.Initialized.selector);
+        vm.expectRevert(Keystore.KeystoreAlreadyInitialized.selector);
         sut.initialize(config);
     }
 
     /// @custom:test-section validateUserOp
 
     function test_validateUserOp_reverts_whenNotCalledByTheEntryPoint(UserOperation memory userOp) external {
-        sut = LibCoinbaseSmartWallet.defaultWalletAccount(factory);
         bytes32 userOpHash = LibCoinbaseSmartWallet.hashUserOp({sut: sut, userOp: userOp, forceChainId: true});
 
         vm.expectRevert(CoinbaseSmartWallet.Unauthorized.selector);
@@ -65,7 +66,6 @@ contract CoinbaseSmartWalletTest is Test {
         // Setup test:
         // 1. Set `userOp.callData` to `CoinbaseSmartWallet.executeWithoutChainIdValidation.selector`.
         // 2. Set `userOp.nonce` NOT to `REPLAYABLE_NONCE_KEY`.
-        sut = LibCoinbaseSmartWallet.defaultWalletAccount(factory);
         uint256 key;
         {
             userOp.callData = abi.encodeWithSelector(CoinbaseSmartWallet.executeWithoutChainIdValidation.selector);
@@ -89,7 +89,6 @@ contract CoinbaseSmartWalletTest is Test {
         // Setup test:
         // 1. Set `userOp.callData` to `CoinbaseSmartWallet.execute.selector`.
         // 2. Set `userOp.nonce` to `REPLAYABLE_NONCE_KEY`.
-        sut = LibCoinbaseSmartWallet.defaultWalletAccount(factory);
         uint256 key;
         {
             userOp.callData = abi.encodeWithSelector(CoinbaseSmartWallet.execute.selector);
@@ -105,11 +104,9 @@ contract CoinbaseSmartWalletTest is Test {
     }
 
     function test_validateUserOp_returnsOne_whenSignatureIsInvalid(
-        bytes32 ksID,
         uint248 privateKey,
         UserOperation memory userOp
     ) external withSenderEntryPoint {
-        
         bytes32 userOpHash = _setUpTestWrapper_validateUserOp({
             privateKey: privateKey,
             isValidSig: false,
@@ -120,8 +117,7 @@ contract CoinbaseSmartWalletTest is Test {
         assertEq(validationData, 1);
     }
 
-    function test_validateUserOp_returnsZero_whenStateProofIsValidAndSignatureIsValid(
-        bytes32 ksID,
+    function test_validateUserOp_returnsZero_whenSignatureIsValid(
         uint248 privateKey,
         UserOperation memory userOp
     ) external withSenderEntryPoint {
@@ -135,8 +131,7 @@ contract CoinbaseSmartWalletTest is Test {
         assertEq(validationData, 0);
     }
 
-    function test_validateUserOp_transferMissingdFundsToEntryPoint_whenStateProofIsValidAndSignatureIsValid(
-        bytes32 ksID,
+    function test_validateUserOp_transferMissingdFundsToEntryPoint_whenSignatureIsValid(
         uint248 privateKey,
         UserOperation memory userOp,
         uint256 missingAccountFunds
@@ -466,12 +461,10 @@ contract CoinbaseSmartWalletTest is Test {
         UserOperation memory userOp
     ) private returns (Vm.Wallet memory wallet, bytes32 userOpHash) {
         // Setup test:
-        // 1. Mock `BridgedKeystore.keystoreStorageRoot` to return 42.
-        // 2. Mock `BridgedKeystore.isValueHashCurrent` to return revert, fail or succeed depending on `keystoreOutput`.
-        // 3. Create a Secp256k1 or Secp256r1 wallet.
-        // 4. Add the `ksID` as owner.
-        // 5. Set `userOp.nonce` to a valid nonce (with valid key).
-        // 6. Set `userOp.signature` to a valid or invalid `signature` of `userOpHash` depending on `isValidSig`.
+        // 1. Create a Secp256k1 or Secp256r1 wallet.
+        // 2. Add the `privateKey` as owner.
+        // 3. Set `userOp.nonce` to a valid nonce (with valid key).
+        // 4. Set `userOp.signature` to a valid or invalid `signature` of `userOpHash` depending on `isValidSig`.
         //    NOTE: Invalid signatures are still correctly encoded.
         sut = LibCoinbaseSmartWallet.passkeyWalletAccount(factory, privateKey);
         wallet = LibCoinbaseSmartWallet.passKeyWallet(privateKey);

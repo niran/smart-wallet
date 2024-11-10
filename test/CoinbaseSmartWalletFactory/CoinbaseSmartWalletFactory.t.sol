@@ -40,11 +40,12 @@ contract CoinbaseSmartWalletFactoryTest is Test {
     /// @custom:test-section createAccount
 
     function test_createAccount_deploysTheAccount_whenNotAlreadyDeployed(
-        bytes32 initialConfigHash,
+        bytes calldata initialOwner,
         uint256 nonce
     ) external {
+        (ConfigLib.Config memory c, bytes memory configData, bytes32 h) = LibCoinbaseSmartWallet.ownerConfig(initialOwner);
         address account = address(
-            sut.getAddress({initialConfigHash: initialConfigHash, nonce: nonce})
+            sut.createAccount({configData: configData, nonce: nonce})
         );
         assertTrue(account != address(0));
         assertGt(account.code.length, 0);

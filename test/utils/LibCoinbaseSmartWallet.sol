@@ -10,7 +10,7 @@ import {UUPSUpgradeable} from "solady/utils/UUPSUpgradeable.sol";
 import {WebAuthn} from "webauthn-sol/WebAuthn.sol";
 import {ConfigLib} from "keyspace-v3/libs/ConfigLib.sol";
 
-import {CoinbaseSmartWallet} from "../../src/CoinbaseSmartWallet.sol";
+import {CoinbaseSmartWallet, CoinbaseSmartWalletConfig} from "../../src/CoinbaseSmartWallet.sol";
 import {CoinbaseSmartWalletFactory} from "../../src/CoinbaseSmartWalletFactory.sol";
 import {ERC1271} from "../../src/ERC1271.sol";
 
@@ -122,13 +122,17 @@ library LibCoinbaseSmartWallet {
     function ownerConfig(bytes memory owner) internal view returns (ConfigLib.Config memory, bytes memory, bytes32) {
         bytes[] memory owners = new bytes[](1);
         owners[0] = owner;
-        bytes memory configData = abi.encode((owners));
+        bytes memory configData = abi.encode(CoinbaseSmartWalletConfig({owners: owners}));
         ConfigLib.Config memory config = ConfigLib.Config({nonce: 0, data: configData});
         bytes32 configHash = hashConfig(config);
         return (config, configData, configHash);
     }
 
     function passkeyOwnerConfig(uint256 privateKey) internal view returns (ConfigLib.Config memory, bytes memory, bytes32) {
+        if (privateKey == 0) {
+            privateKey = 1;
+        }
+
         (uint256 publicKeyX, uint256 publicKeyY) = FCL_ecdsa_utils.ecdsa_derivKpub(privateKey);
         bytes memory owner = abi.encode(publicKeyX, publicKeyY);
         return ownerConfig(owner);
@@ -216,7 +220,6 @@ library LibCoinbaseSmartWallet {
         }
 
         bytes memory sig = abi.encode(webAuthn);
-        bytes memory signer = abi.encode(w.publicKeyX, w.publicKeyY);
         sigData = _encodeSignatureWrapper(0, sig);
     }
 
