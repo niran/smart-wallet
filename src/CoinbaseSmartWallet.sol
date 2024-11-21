@@ -382,7 +382,7 @@ contract CoinbaseSmartWallet is OPStackKeystore, ERC1271, IAccount, UUPSUpgradea
     }
 
     /// @inheritdoc Keystore
-    function _authorizeConfigUpdate(ConfigLib.Config calldata newConfig, BlockLib.BlockHeader memory, bytes calldata authorizationProof)
+    function _authorizeConfigUpdateHook(ConfigLib.Config calldata newConfig, bytes calldata authorizationProof)
         internal
         view
         virtual
@@ -451,16 +451,29 @@ contract CoinbaseSmartWallet is OPStackKeystore, ERC1271, IAccount, UUPSUpgradea
     }
 
     /// @inheritdoc Keystore
-    function _newConfigHook(bytes32 configHash, bytes memory configData) internal virtual override {
+    function _applyConfigHook(ConfigLib.Config calldata config) internal virtual override returns (bool) {
+        bytes32 configHash = ConfigLib.hash(config);
         CoinbaseSmartWalletStorage storage sWallet = _getCoinbaseSmartWalletStorage();
-        CoinbaseSmartWalletConfig memory newConfig = abi.decode(configData, (CoinbaseSmartWalletConfig));
+        CoinbaseSmartWalletConfig memory newConfig = abi.decode(config.data, (CoinbaseSmartWalletConfig));
         sWallet.configVersion[configHash].config = newConfig;
 
         // Register the new signers.
         for (uint256 i; i < newConfig.owners.length; i++) {
             sWallet.configVersion[configHash].view_.isOwner[newConfig.owners[i]] = true;
         }
+
+        bool didUpgrade = false;
+        // TODO: Implement upgrading the implementation address during configuration changes. (PROTO-421)
+
+        return didUpgrade;
     }
+
+    function validateConfigUpdateHook(ConfigLib.Config calldata newConfig, bytes calldata authorizationProof)
+        public
+        view
+        override {
+            // TODO: Implement validation logic. (PROTO-439)
+        }
 
     /// @inheritdoc UUPSUpgradeable
     ///
