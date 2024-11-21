@@ -27,7 +27,7 @@ contract CoinbaseSmartWalletFactoryTest is Test {
     modifier withAccountDeployed(bytes calldata owner, uint256 nonce) {
         (ConfigLib.Config memory c, bytes memory d, bytes32 configHash) = LibCoinbaseSmartWallet.ownerConfig(owner);
         address account =
-            sut.getAddress({initialConfigHash: configHash, nonce: nonce});
+            sut.getAddressByHash({initialConfigHash: configHash, nonce: nonce});
         vm.etch({target: account, newRuntimeBytecode: "Some bytecode"});
 
         _;
@@ -82,7 +82,7 @@ contract CoinbaseSmartWalletFactoryTest is Test {
         external
     {
         address expectedAccountAddress = _create2Address({initialConfigHash: initialConfigHash, nonce: nonce});
-        address accountAddress = sut.getAddress({initialConfigHash: initialConfigHash, nonce: nonce});
+        address accountAddress = sut.getAddressByHash({initialConfigHash: initialConfigHash, nonce: nonce});
 
         assertEq(accountAddress, expectedAccountAddress);
     }

@@ -62,7 +62,7 @@ contract CoinbaseSmartWalletFactory {
     /// @param nonce             The nonce provided to `createAccount()`.
     ///
     /// @return The predicted account deployment address.
-    function getAddress(bytes32 initialConfigHash, uint256 nonce)
+    function getAddressByHash(bytes32 initialConfigHash, uint256 nonce)
         public
         view
         returns (address)
@@ -82,7 +82,7 @@ contract CoinbaseSmartWalletFactory {
         returns (address)
     {
         bytes32 initialConfigHash = _hashConfig(ConfigLib.Config({nonce: uint96(0), data: initialConfigData}));
-        return getAddress(initialConfigHash, nonce);
+        return getAddressByHash(initialConfigHash, nonce);
     }
 
     /// @notice Returns the initialization code hash of the account:
@@ -115,6 +115,14 @@ contract CoinbaseSmartWalletFactory {
         return keccak256(abi.encodePacked(controller, uint96(0), storageHash));
     }
 
+    /// @notice Computes a wallet factory-specific hash of the provided `config`.
+    ///
+    /// @dev The actual config hash calculation includes the address of the wallet, but the factory
+    ///      needs to be able to calculate the hash before the address is known.
+    ///
+    /// @param config The Keystore config.
+    ///
+    /// @return The corresponding config hash.
     function _hashConfig(ConfigLib.Config memory config) internal pure returns (bytes32) {
         return keccak256(abi.encodePacked(config.nonce, config.data));
     }
