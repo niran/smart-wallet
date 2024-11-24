@@ -42,7 +42,7 @@ contract CoinbaseSmartWalletTest is Test {
     /// @custom:test-section initialize
 
     function test_initialize_reverts_whenTheAccountIsAlreadyInitialized(bytes memory owner) external {
-        (ConfigLib.Config memory config, bytes memory configData, bytes32 configHash) = LibCoinbaseSmartWallet.ownerConfig(owner);
+        (ConfigLib.Config memory config, bytes memory configData) = LibCoinbaseSmartWallet.ownerConfig(owner);
         sut = factory.createAccount({
             configData: configData,
             nonce: 0

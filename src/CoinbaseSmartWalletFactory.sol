@@ -44,30 +44,14 @@ contract CoinbaseSmartWalletFactory {
         virtual
         returns (CoinbaseSmartWallet account)
     {
-        ConfigLib.Config memory config = ConfigLib.Config({nonce: uint96(0), data: configData});
-        bytes32 configHash = _hashConfig(config);
         (bool alreadyDeployed, address accountAddress) =
-            LibClone.createDeterministicERC1967(msg.value, implementation, _getSalt(configHash, nonce));
-
+            LibClone.createDeterministicERC1967(msg.value, implementation, _getSalt(configData, nonce));
         account = CoinbaseSmartWallet(payable(accountAddress));
 
         if (!alreadyDeployed) {
+            ConfigLib.Config memory config = ConfigLib.Config({nonce: uint96(0), data: configData});
             account.initialize(config);
         }
-    }
-
-    /// @notice Returns the deterministic address of the account that would be created by `createAccount`.
-    ///
-    /// @param initialConfigHash The hash of the config provided to `createAccount()`.
-    /// @param nonce             The nonce provided to `createAccount()`.
-    ///
-    /// @return The predicted account deployment address.
-    function getAddressByHash(bytes32 initialConfigHash, uint256 nonce)
-        public
-        view
-        returns (address)
-    {
-        return LibClone.predictDeterministicAddress(initCodeHash(), _getSalt(initialConfigHash, nonce), address(this));
     }
 
     /// @notice Returns the deterministic address of the account that would be created by `createAccount`.
@@ -81,8 +65,8 @@ contract CoinbaseSmartWalletFactory {
         view
         returns (address)
     {
-        bytes32 initialConfigHash = _hashConfig(ConfigLib.Config({nonce: uint96(0), data: initialConfigData}));
-        return getAddressByHash(initialConfigHash, nonce);
+        return LibClone.predictDeterministicAddress(
+            initCodeHash(), _getSalt(initialConfigData, nonce), address(this));
     }
 
     /// @notice Returns the initialization code hash of the account:
@@ -95,35 +79,15 @@ contract CoinbaseSmartWalletFactory {
 
     /// @notice Returns the create2 salt for `LibClone.predictDeterministicAddress`
     ///
-    /// @param configHash The hash of the initial config.
-    /// @param nonce      The nonce provided to `createAccount()`.
+    /// @param initialConfigData The initial config data provided to `createAccount()`.
+    /// @param nonce             The nonce provided to `createAccount()`.
     ///
     /// @return The computed salt.
-    function _getSalt(bytes32 configHash,  uint256 nonce)
+    function _getSalt(bytes calldata initialConfigData,  uint256 nonce)
         internal
         pure
         returns (bytes32)
     {
-        return keccak256(abi.encode(configHash, nonce));
-    }
-
-    function _getKeystoreID(address controller, bytes32 storageHash)
-        internal
-        pure
-        returns (bytes32)
-    {
-        return keccak256(abi.encodePacked(controller, uint96(0), storageHash));
-    }
-
-    /// @notice Computes a wallet factory-specific hash of the provided `config`.
-    ///
-    /// @dev The actual config hash calculation includes the address of the wallet, but the factory
-    ///      needs to be able to calculate the hash before the address is known.
-    ///
-    /// @param config The Keystore config.
-    ///
-    /// @return The corresponding config hash.
-    function _hashConfig(ConfigLib.Config memory config) internal pure returns (bytes32) {
-        return keccak256(abi.encodePacked(config.nonce, config.data));
+        return keccak256(abi.encode(initialConfigData, nonce));
     }
 }

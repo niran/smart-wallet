@@ -119,16 +119,15 @@ library LibCoinbaseSmartWallet {
         }
     }
 
-    function ownerConfig(bytes memory owner) internal view returns (ConfigLib.Config memory, bytes memory, bytes32) {
+    function ownerConfig(bytes memory owner) internal view returns (ConfigLib.Config memory, bytes memory) {
         bytes[] memory owners = new bytes[](1);
         owners[0] = owner;
         bytes memory configData = abi.encode(CoinbaseSmartWalletConfig({owners: owners}));
         ConfigLib.Config memory config = ConfigLib.Config({nonce: 0, data: configData});
-        bytes32 configHash = hashConfig(config);
-        return (config, configData, configHash);
+        return (config, configData);
     }
 
-    function passkeyOwnerConfig(uint256 privateKey) internal view returns (ConfigLib.Config memory, bytes memory, bytes32) {
+    function passkeyOwnerConfig(uint256 privateKey) internal view returns (ConfigLib.Config memory, bytes memory) {
         if (privateKey == 0) {
             privateKey = 1;
         }
@@ -145,7 +144,7 @@ library LibCoinbaseSmartWallet {
 
     function defaultWalletAccount(CoinbaseSmartWalletFactory factory) internal returns (CoinbaseSmartWallet) {
         bytes memory owner = hex"abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd";
-        (ConfigLib.Config memory c, bytes memory configData, bytes32 h) = LibCoinbaseSmartWallet.ownerConfig(owner);
+        (ConfigLib.Config memory c, bytes memory configData) = LibCoinbaseSmartWallet.ownerConfig(owner);
         return factory.createAccount({
             configData: configData,
             nonce: 0
@@ -153,7 +152,7 @@ library LibCoinbaseSmartWallet {
     }
 
     function passkeyWalletAccount(CoinbaseSmartWalletFactory factory, uint256 passkey) internal returns (CoinbaseSmartWallet) {
-        (ConfigLib.Config memory c, bytes memory configData, bytes32 h) = LibCoinbaseSmartWallet.passkeyOwnerConfig(passkey);
+        (ConfigLib.Config memory c, bytes memory configData) = LibCoinbaseSmartWallet.passkeyOwnerConfig(passkey);
         return factory.createAccount({
             configData: configData,
             nonce: 0
