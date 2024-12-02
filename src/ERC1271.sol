@@ -152,5 +152,5 @@ abstract contract ERC1271 {
     /// @param signature The signature associated with `hash`.
     ///
     /// @return `true` is the signature is valid, else `false`.
-    function _isValidSignature(bytes32 hash, bytes calldata signature) internal view virtual returns (bool);
+    function _isValidSignature(bytes32 hash, bytes memory signature) internal view virtual returns (bool);
 }

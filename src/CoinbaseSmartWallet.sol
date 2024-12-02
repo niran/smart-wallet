@@ -343,18 +343,10 @@ contract CoinbaseSmartWallet is OPStackKeystore, ERC1271, IAccount, UUPSUpgradea
     /// @dev Reverts if owner at `ownerIndex` is not compatible with `signature` format.
     ///
     /// @param signature ABI encoded `SignatureWrapper`.
-    function _isValidSignature(bytes32 hash, bytes calldata signature) internal view virtual override returns (bool) {
+    function _isValidSignature(bytes32 hash, bytes memory signature) internal view virtual override returns (bool) {
         SignatureWrapper memory sigWrapper = abi.decode(signature, (SignatureWrapper));
         bytes memory ownerBytes = ownerAtIndex(sigWrapper.ownerIndex);
-        return _isValidSignatureForOwner(hash, ownerBytes, sigWrapper.signatureData);
-    }
 
-    /// @notice Validates the signature for the given `ownerBytes` and `hash`.
-    ///
-    /// @param hash          The hash to validate.
-    /// @param ownerBytes    The owner's public key to validate the signature against.
-    /// @param signatureData The unwrapped signature to validate.
-    function _isValidSignatureForOwner(bytes32 hash, bytes memory ownerBytes, bytes memory signatureData) internal view virtual returns (bool) {
         if (ownerBytes.length == 32) {
             if (uint256(bytes32(ownerBytes)) > type(uint160).max) {
                 // technically should be impossible given owners can only be added with
@@ -367,51 +359,18 @@ contract CoinbaseSmartWallet is OPStackKeystore, ERC1271, IAccount, UUPSUpgradea
                 owner := mload(add(ownerBytes, 32))
             }
 
-            return SignatureCheckerLib.isValidSignatureNow(owner, hash, signatureData);
+            return SignatureCheckerLib.isValidSignatureNow(owner, hash, sigWrapper.signatureData);
         }
 
         if (ownerBytes.length == 64) {
             (uint256 x, uint256 y) = abi.decode(ownerBytes, (uint256, uint256));
 
-            WebAuthn.WebAuthnAuth memory auth = abi.decode(signatureData, (WebAuthn.WebAuthnAuth));
+            WebAuthn.WebAuthnAuth memory auth = abi.decode(sigWrapper.signatureData, (WebAuthn.WebAuthnAuth));
 
             return WebAuthn.verify({challenge: abi.encode(hash), requireUV: false, webAuthnAuth: auth, x: x, y: y});
         }
 
         revert InvalidOwnerBytesLength(ownerBytes);
-    }
-
-    /// @inheritdoc Keystore
-    function _authorizeConfigUpdateHook(ConfigLib.Config calldata newConfig, bytes calldata authorizationProof)
-        internal
-        view
-        virtual
-        override
-    {
-        bytes32 newConfigHash = ConfigLib.hash(newConfig);
-        (bytes memory sigAuth, bytes memory sigUpdate) =
-            abi.decode(authorizationProof, (bytes, bytes));
-
-        // Ensure the update is authorized.
-        SignatureWrapper memory sigWrapper = abi.decode(sigAuth, (SignatureWrapper));
-        bytes memory ownerBytes = ownerAtIndex(sigWrapper.ownerIndex);
-        require(_isValidSignatureForOwner(newConfigHash, ownerBytes, sigWrapper.signatureData), UnauthorizedKeystoreConfigUpdate());
-
-        // Verify that `sigUpdate` is a valid signature of newConfigHash with the new owners to ensure
-        // the new owners are valid.
-        CoinbaseSmartWalletConfig memory newData = abi.decode(newConfig.data, (CoinbaseSmartWalletConfig));
-        if (sigUpdate.length == 0) {
-            // If an owner is being added, a second signature is not needed: we can just verify the
-            // same signature using the new config.
-            sigUpdate = sigAuth;
-        }
-        sigWrapper = abi.decode(sigUpdate, (SignatureWrapper));
-        ownerBytes = newData.owners[sigWrapper.ownerIndex];
-
-        require(
-            _isValidSignatureForOwner(newConfigHash, ownerBytes, sigWrapper.signatureData),
-            InvalidKeystoreConfigUpdate()
-        );
     }
 
     function ownerAtIndex(uint256 index) public view virtual returns (bytes memory) {
@@ -468,12 +427,38 @@ contract CoinbaseSmartWallet is OPStackKeystore, ERC1271, IAccount, UUPSUpgradea
         return didUpgrade;
     }
 
+    /// @inheritdoc Keystore
+    function _authorizeConfigUpdateHook(ConfigLib.Config calldata newConfig, bytes calldata authorizationProof)
+        internal
+        view
+        virtual
+        override
+    {
+        bytes32 newConfigHash = ConfigLib.hash(newConfig);
+        (bytes memory sigAuth, ) =
+            abi.decode(authorizationProof, (bytes, bytes));
+
+        // Ensure the update is authorized.
+        require(_isValidSignature(newConfigHash, sigAuth), UnauthorizedKeystoreConfigUpdate());
+    }
+
     function validateConfigUpdateHook(ConfigLib.Config calldata newConfig, bytes calldata authorizationProof)
         public
         view
-        override {
-            // TODO: Implement validation logic. (PROTO-439)
+        override
+    {
+        bytes32 newConfigHash = ConfigLib.hash(newConfig);
+        (bytes memory sigAuth, bytes memory sigUpdate) =
+            abi.decode(authorizationProof, (bytes, bytes));
+
+        if (sigUpdate.length == 0) {
+            // If the current signer isn't being removed, a second signature is not needed: we can
+            // just verify the same signature using the new config.
+            sigUpdate = sigAuth;
         }
+
+        require(_isValidSignature(newConfigHash, sigUpdate), InvalidKeystoreConfigUpdate());
+    }
 
     /// @inheritdoc UUPSUpgradeable
     ///
