@@ -119,12 +119,6 @@ contract CoinbaseSmartWallet is OPStackKeystore, ERC1271, IAccount, UUPSUpgradea
     /// @notice Thrown when the caller is not authorized.
     error UnauthorizedCaller();
 
-    /// @notice Thrown when the Keystore config update is not authorized.
-    error UnauthorizedKeystoreConfigUpdate();
-
-    /// @notice Thrown when the Keystore config update is invalid.
-    error InvalidKeystoreConfigUpdate();
-
     /// @notice Reverts if the caller is not the EntryPoint.
     modifier onlyEntryPoint() virtual {
         if (msg.sender != entryPoint()) {
@@ -410,7 +404,7 @@ contract CoinbaseSmartWallet is OPStackKeystore, ERC1271, IAccount, UUPSUpgradea
     }
 
     /// @inheritdoc Keystore
-    function _applyConfigHook(ConfigLib.Config calldata config) internal virtual override returns (bool) {
+    function _hookApplyNewConfig(ConfigLib.Config calldata config) internal virtual override returns (bool) {
         bytes32 configHash = ConfigLib.hash(config);
         CoinbaseSmartWalletStorage storage sWallet = _getCoinbaseSmartWalletStorage();
         CoinbaseSmartWalletConfig memory newConfig = abi.decode(config.data, (CoinbaseSmartWalletConfig));
@@ -428,24 +422,25 @@ contract CoinbaseSmartWallet is OPStackKeystore, ERC1271, IAccount, UUPSUpgradea
     }
 
     /// @inheritdoc Keystore
-    function _authorizeConfigUpdateHook(ConfigLib.Config calldata newConfig, bytes calldata authorizationProof)
+    function _hookIsNewConfigAuthorized(ConfigLib.Config calldata newConfig, bytes calldata authorizationProof)
         internal
         view
         virtual
         override
+        returns (bool)
     {
         bytes32 newConfigHash = ConfigLib.hash(newConfig);
         (bytes memory sigAuth, ) =
             abi.decode(authorizationProof, (bytes, bytes));
 
-        // Ensure the update is authorized.
-        require(_isValidSignature(newConfigHash, sigAuth), UnauthorizedKeystoreConfigUpdate());
+        return _isValidSignature(newConfigHash, sigAuth);
     }
 
-    function validateConfigUpdateHook(ConfigLib.Config calldata newConfig, bytes calldata authorizationProof)
+    function hookIsNewConfigValid(ConfigLib.Config calldata newConfig, bytes calldata authorizationProof)
         public
         view
         override
+        returns (bool)
     {
         bytes32 newConfigHash = ConfigLib.hash(newConfig);
         (bytes memory sigAuth, bytes memory sigUpdate) =
@@ -457,7 +452,7 @@ contract CoinbaseSmartWallet is OPStackKeystore, ERC1271, IAccount, UUPSUpgradea
             sigUpdate = sigAuth;
         }
 
-        require(_isValidSignature(newConfigHash, sigUpdate), InvalidKeystoreConfigUpdate());
+        return _isValidSignature(newConfigHash, sigUpdate);
     }
 
     /// @inheritdoc UUPSUpgradeable
